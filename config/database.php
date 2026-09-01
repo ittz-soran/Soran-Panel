@@ -44,6 +44,24 @@ return [
             'transaction_mode' => 'DEFERRED',
         ],
 
+        /*
+         * The account that may CREATE DATABASE — used only by
+         * DirectDatabaseMaker, and deliberately not the panel's own user, which
+         * has rights over one schema. PANEL_DOC Section 4: on the real cPanel
+         * host this is denied outright and UAPI is used instead.
+         */
+        'maker' => [
+            'driver' => 'mysql',
+            'host' => env('PANEL_MAKER_HOST', '127.0.0.1'),
+            'port' => env('PANEL_MAKER_PORT', '3306'),
+            'database' => null,
+            'username' => env('PANEL_MAKER_USERNAME', 'root'),
+            'password' => env('PANEL_MAKER_PASSWORD', ''),
+            'charset' => 'utf8mb4',
+            'collation' => 'utf8mb4_unicode_ci',
+            'prefix' => '',
+        ],
+
         'mysql' => [
             'driver' => 'mysql',
             'url' => env('DB_URL'),

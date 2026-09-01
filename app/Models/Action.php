@@ -30,6 +30,29 @@ class Action extends Model
         ];
     }
 
+    /**
+     * Write down what the panel just did — PANEL_DOC Section 1, rule 2:
+     * "anything that reaches into a customer's install leaves a record with a
+     * name on it."
+     *
+     * One method, so that no caller has to remember to fetch the operator or
+     * the IP address. The signed-in user and the request are read here rather
+     * than passed in, because a caller that has to supply them is a caller that
+     * can supply the wrong ones — or, on the day it matters, none at all.
+     *
+     * @param  array<string, mixed>|null  $detail  from → to, as JSON
+     */
+    public static function record(string $action, ?Customer $customer = null, ?array $detail = null): self
+    {
+        return self::create([
+            'customer_id' => $customer?->id,
+            'user_id' => auth()->id(),
+            'action' => $action,
+            'detail' => $detail,
+            'ip_address' => request()->ip(),
+        ]);
+    }
+
     public function customer(): BelongsTo
     {
         return $this->belongsTo(Customer::class);

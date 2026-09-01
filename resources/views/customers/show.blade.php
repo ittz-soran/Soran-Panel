@@ -22,6 +22,37 @@
     $licence = $customer->currentLicence;
 @endphp
 
+{{--
+    The administrator's password, shown once and never again.
+
+    Nothing stores it: it is a hash in the shop's own users table by the time
+    this renders, and it is deliberately not in `actions` — a log that carries a
+    password hands over every shop it describes.
+--}}
+@if (session('made'))
+    @php
+        $made = session('made');
+    @endphp
+    <div class="alert alert-success">
+        <h2 class="h6 mb-2"><i class="bi bi-check-circle me-1"></i>The shop is ready. Write this down now.</h2>
+        <p class="small mb-2">
+            This is the only time this password is shown. Nothing here has kept a copy — it is already
+            just a hash inside the shop's own database.
+        </p>
+        <dl class="row mb-2 small">
+            <dt class="col-4 col-sm-3 fw-normal">Address</dt>
+            <dd class="col-8 col-sm-9"><code>https://{{ $made['host'] }}</code></dd>
+            <dt class="col-4 col-sm-3 fw-normal">Signs in as</dt>
+            <dd class="col-8 col-sm-9"><code>{{ $made['email'] }}</code></dd>
+            <dt class="col-4 col-sm-3 fw-normal">Password</dt>
+            <dd class="col-8 col-sm-9"><code class="user-select-all fs-6">{{ $made['password'] }}</code></dd>
+        </dl>
+        <p class="small mb-0 text-body-secondary">
+            Point the domain at <code>{{ $customer->public_path }}</code> in cPanel if you have not already.
+        </p>
+    </div>
+@endif
+
 @if ($latest && ! $latest->reachable)
     <div class="alert alert-danger">
         <div class="fw-semibold">
@@ -84,7 +115,7 @@
 
                     {{-- The cross-check Section 8 exists to make: what the shop
                          itself says, beside what the panel believes. --}}
-                    @if ($check?->licence_state)
+                    @if ($check?->licence_state && $customer->status !== 'suspended')
                         @php
                             $agrees = match ($check->licence_state) {
                                 'valid', 'expiring' => $licence->daysLeft() === null || $licence->daysLeft() >= 0,
@@ -359,10 +390,80 @@
         <i class="bi bi-exclamation-triangle me-2"></i>Danger zone
     </div>
     <ul class="list-group list-group-flush">
+        <li class="list-group-item d-flex flex-wrap justify-content-between align-items-center gap-2">
+            <span>
+                <span class="d-block">Renew the licence</span>
+                <small class="text-secondary">
+                    You run the signing command on your own machine and paste the result back.
+                    Checked here before anything is written.
+                </small>
+            </span>
+            <a href="{{ route('customers.renew', $customer) }}" class="btn btn-sm btn-outline-danger">
+                Renew…
+            </a>
+        </li>
+
+        {{-- Section 7: logged, from → to. --}}
+        <li class="list-group-item">
+            <form method="POST" action="{{ route('customers.storage', $customer) }}" data-guard-submit
+                  class="d-flex flex-wrap justify-content-between align-items-end gap-2 m-0">
+                @csrf
+                <div>
+                    <label for="storage_limit_mb" class="form-label mb-1">Change the storage limit</label>
+                    <div class="input-group input-group-sm" style="max-width: 16rem">
+                        <input type="number" min="64" max="1048576" step="64"
+                               class="form-control @error('storage_limit_mb') is-invalid @enderror"
+                               id="storage_limit_mb" name="storage_limit_mb"
+                               value="{{ old('storage_limit_mb', $customer->storage_limit_mb) }}"
+                               placeholder="no limit">
+                        <span class="input-group-text">MB</span>
+                    </div>
+                    @error('storage_limit_mb')<div class="text-danger small">{{ $message }}</div>@enderror
+                    <small class="text-secondary d-block mt-1">
+                        Written into the shop's .env, where the shop reads it. Empty means no ceiling at
+                        all — nothing then stops it filling the account's disk.
+                    </small>
+                </div>
+                <button type="submit" class="btn btn-sm btn-outline-danger">Set the limit</button>
+            </form>
+        </li>
+
+        {{-- Section 7: hold to confirm, typed shop name. --}}
+        <li class="list-group-item d-flex flex-wrap justify-content-between align-items-start gap-2">
+            <span>
+                @if ($customer->status === 'suspended')
+                    <span class="d-block">Let this shop trade again</span>
+                    <small class="text-secondary">
+                        Puts back the licence it already had — nothing new is signed. If that licence has
+                        since run out, renew it instead.
+                    </small>
+                @else
+                    <span class="d-block">Suspend this shop</span>
+                    <small class="text-secondary">
+                        Takes the licence out of its .env, which makes the shop read-only. They can still
+                        read and print their own records — a shop locked out of its records never pays.
+                    </small>
+                @endif
+            </span>
+
+            @if ($customer->status === 'suspended')
+                <x-danger-form
+                    :action="route('customers.resume', $customer)"
+                    label="Let them trade"
+                    variant="success" />
+            @else
+                <x-danger-form
+                    :action="route('customers.suspend', $customer)"
+                    label="Suspend"
+                    :confirm="$customer->host"
+                    :confirmLabel="'Type '.$customer->host.' to suspend'">
+                    <input type="text" name="why" class="form-control form-control-sm mb-2"
+                           placeholder="Why, for the record (optional)" maxlength="255">
+                </x-danger-form>
+            @endif
+        </li>
+
         @foreach ([
-            ['Renew the licence', 'Issue a new licence and deliver it to this shop.', 'build order step 6'],
-            ['Change the storage limit', 'Write a new limit into the shop’s .env. Logged, from → to.', 'build order step 7'],
-            [$customer->status === 'suspended' ? 'Resume this shop' : 'Suspend this shop', 'Hold to confirm, and type the shop’s name.', 'build order step 7'],
             ['Run this shop’s migrations', 'A backup is taken first. Hold to confirm.', 'build order step 7'],
             ['Run a backup, and download it', 'Logged.', 'build order step 7'],
         ] as [$label, $what, $step])

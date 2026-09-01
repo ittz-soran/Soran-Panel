@@ -39,6 +39,57 @@ return [
     |
     */
 
+    /*
+    |---------------------------------------------------------------------------
+    | Making a new shop's database
+    |---------------------------------------------------------------------------
+    |
+    | PANEL_DOC Section 4: on this cPanel account plain `CREATE DATABASE` is
+    | denied, and the way through is UAPI at /usr/bin/uapi. On Soran's own
+    | machine there is no UAPI and SQL is all there is — so which one runs is a
+    | setting, and the panel is developed on one and deployed on the other.
+    |
+    | `cpanel.prefix` is the account name cPanel puts in front of every database
+    | and user it makes. The panel has to record the REAL name, or it cannot
+    | read that shop again.
+    |
+    */
+
+    'database_maker' => [
+        'driver' => env('PANEL_DATABASE_MAKER', 'direct'),
+
+        // The connection with rights to create databases — never the panel's
+        // own, which deliberately has rights over one schema only.
+        'connection' => env('PANEL_DATABASE_MAKER_CONNECTION', 'mysql'),
+    ],
+
+    /*
+    |---------------------------------------------------------------------------
+    | Where shops live
+    |---------------------------------------------------------------------------
+    |
+    | PANEL_DOC Section 4: document roots cannot leave public_html — cPanel was
+    | tested and silently made its own folder inside it, ignoring the path that
+    | was typed. So a shop's private folder and its public folder are in
+    | different places, and both are settings rather than anything derived.
+    |
+    | `shared_artisan` is the one codebase every shop reads (Section 3). The
+    | panel runs `shop:provision` through it, because that command lives in the
+    | shop system beside install:sql and the bootstrap it defers to.
+    |
+    */
+
+    'shops' => [
+        'home_root' => env('PANEL_SHOPS_HOME', '/home/soransto/shops'),
+        'public_root' => env('PANEL_SHOPS_PUBLIC', '/home/soransto/public_html'),
+        'shared_artisan' => env('PANEL_SHARED_ARTISAN', '/home/soransto/smart-store/artisan'),
+    ],
+
+    'cpanel' => [
+        'uapi' => env('PANEL_UAPI', '/usr/bin/uapi'),
+        'prefix' => env('PANEL_CPANEL_PREFIX', ''),
+    ],
+
     'attention' => [
 
         // A licence within this many days of its end — and anything already

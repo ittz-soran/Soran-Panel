@@ -329,6 +329,7 @@ class ScreensTest extends TestCase
             ->assertOk()
             ->assertSee('Danger zone')
             ->assertSee('Renew the licence')
+            ->assertSee('Renew…', false)
             ->assertSee('Suspend this shop')
             ->assertSee('Run this shop’s migrations', false)
             ->assertSee('Not built yet')
