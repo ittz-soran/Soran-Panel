@@ -26,6 +26,23 @@ abstract class TestCase extends BaseTestCase
     {
         parent::setUp();
 
+        /*
+         * The panel builds no assets of its own: public/build is the shop
+         * system's compiled output, copied in at deploy time (PANEL_DOC Section
+         * 10) and deliberately not committed. So on a fresh clone it is not
+         * there, and every test that renders a page died on
+         * ViteManifestNotFoundException — ten of them, and CI would have been
+         * red for the same reason on the first push.
+         *
+         * A view test is about the view, not about the asset pipeline, so the
+         * pipeline is stubbed out here. What that would otherwise hide — the
+         * @vite entry names no longer matching the borrowed manifest — is
+         * checked by BorrowedStylesheetTest, which reads the real build/ where
+         * there is one and skips where there is not, because that is a
+         * deploy-time check and belongs wherever the assets actually are.
+         */
+        $this->withoutVite();
+
         $connection = config('database.default');
         $driver = config("database.connections.{$connection}.driver");
         $database = (string) config("database.connections.{$connection}.database");

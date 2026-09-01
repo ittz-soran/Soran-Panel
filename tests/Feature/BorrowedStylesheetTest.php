@@ -108,4 +108,85 @@ class BorrowedStylesheetTest extends TestCase
 
         return $css;
     }
+
+    /**
+     * The names the layouts ask @vite for must be keys in the borrowed manifest.
+     *
+     * This is the check the base TestCase's withoutVite() would otherwise hide,
+     * and it is the one that breaks quietly: the panel's shells ask for
+     * `resources/scss/app.scss` and `resources/js/app.js` because those are the
+     * shop system's Vite entry names, not because the panel has such files —
+     * it has neither, and no npm at all. If the shop system ever renames an
+     * entry, the copied manifest stops answering and every page throws.
+     */
+    public function test_the_entry_names_the_layouts_ask_for_are_in_the_borrowed_manifest(): void
+    {
+        $manifest = public_path('build/manifest.json');
+
+        if (! is_file($manifest)) {
+            $this->markTestSkipped(
+                'public/build is not present. It is the shop system\'s compiled build/, '
+                .'copied in at deploy time (Section 10), so this check runs where the assets do.'
+            );
+        }
+
+        $entries = json_decode((string) file_get_contents($manifest), true);
+        $asked = $this->entriesTheLayoutsAskFor();
+
+        $this->assertNotSame([], $asked, 'no @vite call was found in any layout at all');
+
+        foreach ($asked as $entry => $file) {
+            // Only the real entry points in the message. The manifest also keys
+            // every bundled font, and a hundred .woff lines buries the answer.
+            $available = array_keys(array_filter(
+                $entries,
+                fn ($details) => ! empty($details['isEntry']),
+            ));
+
+            $this->assertArrayHasKey($entry, $entries, sprintf(
+                "%s asks @vite for [%s], which the borrowed manifest does not have.\n".
+                "The entries it does have: %s\n".
+                'Either the shop system renamed an entry, or build/ is stale.',
+                $file, $entry, implode(', ', $available),
+            ));
+        }
+    }
+
+    /**
+     * @return array<string, string> entry name => the view that asks for it
+     */
+    private function entriesTheLayoutsAskFor(): array
+    {
+        $asked = [];
+
+        // Not glob(): PHP's ** is not recursive, so a layout that moved up or
+        // down a folder would silently stop being checked.
+        $views = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator(resource_path('views')),
+        );
+
+        foreach ($views as $view) {
+            if (! $view->isFile() || ! str_ends_with($view->getFilename(), '.blade.php')) {
+                continue;
+            }
+
+            $view = $view->getPathname();
+
+            preg_match_all(
+                '/@vite\(\s*\[(.*?)\]/s',
+                (string) file_get_contents($view),
+                $calls,
+            );
+
+            foreach ($calls[1] as $arguments) {
+                preg_match_all('/[\'"]([^\'"]+)[\'"]/', $arguments, $names);
+
+                foreach ($names[1] as $entry) {
+                    $asked[$entry] = str_replace(base_path().'/', '', $view);
+                }
+            }
+        }
+
+        return $asked;
+    }
 }
