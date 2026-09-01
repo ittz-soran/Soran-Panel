@@ -454,4 +454,50 @@ class ScreensTest extends TestCase
             ->assertSee('never been read')
             ->assertDontSee('the last reading that worked');
     }
+
+    /**
+     * A reading taken before the licence was delivered cannot disagree with it.
+     *
+     * The hourly check runs on its own schedule, so straight after a renewal
+     * the newest reading is usually older than the licence. Comparing them then
+     * reported "the shop says unlicensed" about a shop that had just been
+     * asked, answered `valid`, and been fine ever since. A false alarm here is
+     * worse than none: the point of the line is that a real disagreement gets
+     * noticed.
+     */
+    public function test_a_reading_older_than_the_licence_is_not_called_a_disagreement(): void
+    {
+        $customer = Customer::factory()->create();
+
+        Licence::factory()->for($customer)->create([
+            'issued_on' => now()->subHour(),
+            'expires_on' => now()->addMonths(6),
+            'delivered_at' => now()->subMinutes(10),
+        ]);
+
+        // Taken before the licence went on.
+        $this->healthy($customer, ['checked_at' => now()->subHours(3), 'licence_state' => 'unlicensed']);
+
+        $this->get(route('customers.show', $customer))
+            ->assertOk()
+            ->assertDontSee('does not match what the panel believes');
+    }
+
+    /** A reading taken since the licence went on still speaks up. */
+    public function test_a_reading_since_the_licence_still_reports_a_disagreement(): void
+    {
+        $customer = Customer::factory()->create();
+
+        Licence::factory()->for($customer)->create([
+            'issued_on' => now()->subDay(),
+            'expires_on' => now()->addMonths(6),
+            'delivered_at' => now()->subHours(4),
+        ]);
+
+        $this->healthy($customer, ['checked_at' => now(), 'licence_state' => 'wrong_host']);
+
+        $this->get(route('customers.show', $customer))
+            ->assertOk()
+            ->assertSee('does not match what the panel believes');
+    }
 }

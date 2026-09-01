@@ -115,7 +115,29 @@
 
                     {{-- The cross-check Section 8 exists to make: what the shop
                          itself says, beside what the panel believes. --}}
-                    @if ($check?->licence_state && $customer->status !== 'suspended')
+                    @php
+                        /*
+                         * Only a reading taken AFTER the licence was delivered
+                         * can disagree with it.
+                         *
+                         * The hourly check runs on its own schedule, so right
+                         * after a renewal the newest reading is usually older
+                         * than the licence — and comparing the two then reports
+                         * "the shop says unlicensed" about a shop that was
+                         * asked, answered `valid`, and has been fine since. A
+                         * false alarm on this screen is worse than no alarm:
+                         * the whole point of it is that a real disagreement
+                         * gets noticed.
+                         */
+                        $comparable = $check?->licence_state
+                            && $customer->status !== 'suspended'
+                            && (
+                                $licence?->delivered_at === null
+                                || $check->checked_at->gte($licence->delivered_at)
+                            );
+                    @endphp
+
+                    @if ($comparable)
                         @php
                             $agrees = match ($check->licence_state) {
                                 'valid', 'expiring' => $licence->daysLeft() === null || $licence->daysLeft() >= 0,
@@ -323,9 +345,9 @@
                     <dt class="col-6 fw-normal text-secondary">Started</dt>
                     <dd class="col-6">{{ $customer->started_on?->toDateString() ?? '—' }}</dd>
                 </dl>
-                <p class="small text-secondary mt-3 mb-0">
-                    Recording payments arrives with build order step 8.
-                </p>
+                <a href="{{ route('subscriptions.show', $customer) }}" class="btn btn-sm btn-outline-secondary mt-3">
+                    <i class="bi bi-cash-coin me-1"></i>Payments
+                </a>
             </div>
         </div>
     </div>

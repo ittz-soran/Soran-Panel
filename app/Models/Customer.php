@@ -245,8 +245,83 @@ class Customer extends Model
      */
     public function paidUpTo(): ?Carbon
     {
-        $covered = $this->payments()->max('covers_to');
+        // The aggregate when a list loaded one, so the Subscriptions screen
+        // does not run a query per row; the query itself otherwise, so calling
+        // this on a single customer still tells the truth.
+        $covered = $this->attributes['payments_max_covers_to'] ?? $this->payments()->max('covers_to');
 
         return $covered ? Carbon::parse($covered) : null;
+    }
+
+    /**
+     * Whether they owe money today — Section 9's Subscriptions screen.
+     *
+     * Asked as "nobody has paid for a period that reaches today", which covers
+     * the customer who has never paid at all without needing a second clause:
+     * there is no such payment either way. A payment recorded for next month
+     * counts — paying early is paying.
+     *
+     * @param  Builder<Customer>  $query
+     */
+    public function scopeOwing(Builder $query): void
+    {
+        $query->live()->whereDoesntHave(
+            'payments',
+            fn ($payment) => $payment->whereDate('covers_to', '>=', now()->toDateString()),
+        );
+    }
+
+    /**
+     * How many months are unpaid.
+     *
+     * From what they last paid up to — or from the day they started, for a
+     * customer who has never paid at all, because a trial that quietly became
+     * a shop and was never invoiced is exactly what this screen is for.
+     *
+     * Never less than one once they are owing: a week late is a month's
+     * invoice, which is how the business actually works.
+     */
+    public function monthsOwed(): int
+    {
+        /*
+         * Nobody who has stopped trading owes anything.
+         *
+         * The `owing` scope already excludes them, and without this the model
+         * disagreed with its own scope: a suspended or ended shop was left off
+         * the Owing filter and still shown as "24 months" on the row beside it.
+         * Whatever they owed when they left is a conversation, not a figure the
+         * panel should keep adding a month to for ever.
+         */
+        if (! $this->isLive()) {
+            return 0;
+        }
+
+        $from = $this->paidUpTo() ?? $this->started_on;
+
+        if ($from === null || $from->copy()->endOfDay()->isFuture()) {
+            return 0;
+        }
+
+        return max(1, (int) $from->copy()->startOfDay()->diffInMonths(now()->startOfDay()));
+    }
+
+    /** What they owe, in whole dinars — PROJECT_DOC Section 2. */
+    public function owes(): int
+    {
+        return $this->monthsOwed() * (int) $this->monthly_fee;
+    }
+
+    /** Days past what they were paid up to. Null if they are not late. */
+    public function daysLate(): ?int
+    {
+        $paidUpTo = $this->paidUpTo();
+
+        if ($paidUpTo === null) {
+            return $this->started_on?->isPast() ? (int) $this->started_on->diffInDays(now()) : null;
+        }
+
+        return $paidUpTo->copy()->endOfDay()->isPast()
+            ? (int) $paidUpTo->copy()->startOfDay()->diffInDays(now()->startOfDay())
+            : null;
     }
 }
