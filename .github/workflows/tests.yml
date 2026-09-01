@@ -1,0 +1,94 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  sqlite:
+    runs-on: ubuntu-latest
+    name: PHP ${{ matrix.php }} · SQLite
+    strategy:
+      fail-fast: false
+      matrix:
+        # 8.3 is what the hosting runs (PANEL_DOC Section 4). 8.4 is there so a
+        # version bump on the server is not the first time the suite sees it.
+        php: ['8.3', '8.4']
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: dom, curl, libxml, mbstring, zip, pcntl, pdo, sqlite, pdo_sqlite, intl, gd, openssl
+          coverage: none
+
+      - run: composer install --prefer-dist --no-interaction --no-progress
+      - run: cp .env.example .env
+      - run: php artisan key:generate
+      - run: php artisan test
+
+  mariadb:
+    runs-on: ubuntu-latest
+    name: PHP 8.3 · MariaDB
+
+    # PANEL_DOC Section 1: "If a change depends on MySQL, a browser, or Apache,
+    # test it there." The project has already shipped a MariaDB reserved word
+    # that SQLite accepted. The suite runs on both engines so it cannot happen
+    # a second time without CI saying so.
+    services:
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_ROOT_PASSWORD: root
+          MARIADB_DATABASE: soran_panel_test
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=10s --health-timeout=5s --health-retries=10
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: dom, curl, libxml, mbstring, zip, pcntl, pdo, mysql, pdo_mysql, intl, gd, openssl
+          coverage: none
+
+      - run: composer install --prefer-dist --no-interaction --no-progress
+      - run: cp .env.example .env
+      - run: php artisan key:generate
+
+      - name: Execute tests against MariaDB
+        env:
+          DB_CONNECTION: mysql
+          DB_HOST: 127.0.0.1
+          DB_PORT: 3306
+          DB_DATABASE: soran_panel_test
+          DB_USERNAME: root
+          DB_PASSWORD: root
+        run: php vendor/bin/phpunit
+
+  style:
+    runs-on: ubuntu-latest
+    name: Pint
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+      - run: composer install --prefer-dist --no-interaction --no-progress
+      - run: ./vendor/bin/pint --test
