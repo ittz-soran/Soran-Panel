@@ -33,7 +33,7 @@ Point `DB_*` at the panel's **own** database — it never shares one with a shop
 (PANEL_DOC Section 5) — then:
 
 ```bash
-php artisan migrate
+php artisan migratez
 ```
 
 There is no `/register` route and there never will be: an account here reaches
