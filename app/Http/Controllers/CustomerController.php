@@ -3,8 +3,11 @@
 namespace App\Http\Controllers;
 
 use App\Models\Customer;
+use App\Services\ShopControls;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
+use Throwable;
 
 /**
  * The working screen, and one shop in full — PANEL_DOC Section 9.
@@ -60,5 +63,56 @@ class CustomerController extends Controller
             'recentChecks' => $customer->healthChecks()
                 ->orderByDesc('checked_at')->limit(12)->get(),
         ]);
+    }
+
+    /** Section 7: logged, from → to. */
+    public function storageLimit(Request $request, Customer $customer, ShopControls $controls): RedirectResponse
+    {
+        $fields = $request->validate([
+            // Null is allowed and means no ceiling at all — which is a real
+            // choice for Soran's own shop, and a dangerous one for anybody
+            // else's, so the screen says so rather than the validator refusing.
+            'storage_limit_mb' => ['nullable', 'integer', 'min:64', 'max:1048576'],
+        ]);
+
+        try {
+            $controls->setStorageLimit($customer, $fields['storage_limit_mb'] ?? null);
+        } catch (Throwable $e) {
+            return back()->with('warning', 'Nothing was changed: '.$e->getMessage());
+        }
+
+        return back()->with('success', $fields['storage_limit_mb'] === null
+            ? "{$customer->name} now has no storage limit at all."
+            : "{$customer->name}'s limit is now ".number_format((int) $fields['storage_limit_mb']).' MB.');
+    }
+
+    /** Section 7: hold to confirm, typed shop name. */
+    public function suspend(Request $request, Customer $customer, ShopControls $controls): RedirectResponse
+    {
+        $request->validate(['why' => ['nullable', 'string', 'max:255']]);
+
+        try {
+            $result = $controls->suspend($customer, $request->input('why'));
+        } catch (Throwable $e) {
+            return back()->with('warning', 'Nothing was changed: '.$e->getMessage());
+        }
+
+        // Suspending successfully is still a warning rather than a success:
+        // somebody's till has just been stopped, and that is not good news even
+        // when it is the intended news.
+        return back()->with('warning', $result['said']);
+    }
+
+    public function resume(Customer $customer, ShopControls $controls): RedirectResponse
+    {
+        try {
+            $result = $controls->resume($customer);
+        } catch (Throwable $e) {
+            return back()->with('warning', $e->getMessage());
+        }
+
+        // Green only when the shop itself says it is trading again. A resume
+        // the shop did not accept looked like a success and was not.
+        return back()->with($result['ok'] ? 'success' : 'warning', $result['said']);
     }
 }

@@ -3,6 +3,7 @@
 use App\Http\Controllers\AuthenticatorController;
 use App\Http\Controllers\CustomerController;
 use App\Http\Controllers\LicenceController;
+use App\Http\Controllers\NewCustomerController;
 use App\Http\Controllers\OperatorController;
 use App\Http\Controllers\OverviewController;
 use Illuminate\Support\Facades\Route;
@@ -22,12 +23,22 @@ Route::middleware('auth')->group(function () {
     Route::get('overview', [OverviewController::class, 'index'])->name('overview');
 
     Route::get('customers', [CustomerController::class, 'index'])->name('customers.index');
+
+    // Step 7. Before {customer}, or `new` is read as a customer's id.
+    Route::get('customers/new', [NewCustomerController::class, 'create'])->name('customers.create');
+    Route::post('customers/new', [NewCustomerController::class, 'store'])->name('customers.store');
     Route::get('customers/{customer}', [CustomerController::class, 'show'])->name('customers.show');
 
     // Renew — Section 6. The panel shows a command and takes a paste; it never
     // signs anything, because the private key never reaches this server.
     Route::get('customers/{customer}/renew', [LicenceController::class, 'create'])->name('customers.renew');
     Route::post('customers/{customer}/renew', [LicenceController::class, 'store'])->name('customers.renew.store');
+
+    // Section 7's controls. All of them write the shop's .env, ask the shop
+    // what it now thinks, and leave a record with a name on it.
+    Route::post('customers/{customer}/storage', [CustomerController::class, 'storageLimit'])->name('customers.storage');
+    Route::post('customers/{customer}/suspend', [CustomerController::class, 'suspend'])->name('customers.suspend');
+    Route::post('customers/{customer}/resume', [CustomerController::class, 'resume'])->name('customers.resume');
 
     /*
      * Who may sign in. Not under a customer, because an operator belongs to the

@@ -3,6 +3,12 @@
 @section('title', 'Customers')
 @section('subheading', 'Every shop sold, and what it is doing.')
 
+@section('actions')
+    <a href="{{ route('customers.create') }}" class="btn btn-sm btn-primary">
+        <i class="bi bi-plus-lg me-1"></i>New customer
+    </a>
+@endsection
+
 @section('content')
     <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
         {{-- The one filter Section 9 names. Both counts on the buttons, so the
@@ -27,7 +33,7 @@
                 <p class="text-secondary mb-0">
                     {{ $chasing
                         ? 'Every live shop is licensed, has room, and is being used.'
-                        : 'New customer arrives with build order step 7.' }}
+                        : 'Nothing has been sold yet. New customer sets one up from nothing.' }}
                 </p>
             </div>
         </div>
