@@ -33,12 +33,12 @@
                 <span class="badge text-bg-success">done</span>
             </li>
             <li class="list-group-item d-flex justify-content-between align-items-center">
-                <span><i class="bi bi-hourglass-split text-secondary me-2"></i>Reading a shop, and the hourly health check</span>
-                <span class="badge text-bg-secondary">next</span>
+                <span><i class="bi bi-check-circle text-success me-2"></i>Reading a shop, and the hourly health check</span>
+                <span class="badge text-bg-success">done</span>
             </li>
             <li class="list-group-item d-flex justify-content-between align-items-center">
                 <span><i class="bi bi-hourglass-split text-secondary me-2"></i>Customers, one customer, Overview — the screens that only read</span>
-                <span class="badge text-bg-secondary">after that</span>
+                <span class="badge text-bg-secondary">next</span>
             </li>
         </ul>
     </div>
