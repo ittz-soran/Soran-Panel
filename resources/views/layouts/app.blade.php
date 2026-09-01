@@ -72,6 +72,8 @@
     @endforeach
 </div>
 
+@include('partials.confirm-word')
+
 @stack('scripts')
 </body>
 </html>

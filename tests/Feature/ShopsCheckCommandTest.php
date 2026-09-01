@@ -32,6 +32,11 @@ class ShopsCheckCommandTest extends TestCase
             {
                 return ($this->answer)($customer);
             }
+
+            public function licenceState(Customer $customer): ?string
+            {
+                return $this->read($customer)->licenceState;
+            }
         });
     }
 

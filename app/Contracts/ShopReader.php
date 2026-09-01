@@ -27,4 +27,18 @@ interface ShopReader
      * a stopped database must not stop the other five being looked at.
      */
     public function read(Customer $customer): ShopReading;
+
+    /**
+     * Just what the shop makes of its own licence — PANEL_DOC Section 6, step 7.
+     *
+     * "The shop is asked what it now thinks, and the answer is shown back.
+     * `delivered_at` is set from a confirmation, never from an assumption."
+     *
+     * Separate from read() because read() runs the data check over every row
+     * the shop has, and a person is standing at the screen waiting for this
+     * one. Returns the shop's own word — valid, expiring, missing, invalid,
+     * wrong_host, unlicensed — or null if it could not be asked at all, which
+     * is not the same as a licence that did not work.
+     */
+    public function licenceState(Customer $customer): ?string;
 }

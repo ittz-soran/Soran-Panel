@@ -7,19 +7,15 @@ return [
     | The seller's public key
     |---------------------------------------------------------------------------
     |
-    | The same value the shop system holds in its own config/licence.php, copied
-    | here rather than imported — PANEL_DOC Section 10. The panel is a separate
-    | application; nothing of the shop system's code is loaded into it.
+    | The same key every copy of the shop system ships with, so the panel can
+    | check a licence with exactly the arithmetic the shop will use. If these
+    | two ever disagree, the panel accepts a string the customer's shop then
+    | rejects, and the customer is locked out by the very act of renewing.
     |
-    | This is the half that CHECKS a licence. The half that MAKES one is the
-    | private key, and PANEL_DOC Section 6 is built around it never reaching
-    | this server: a break-in on soranstore.com must not be able to forge a
-    | licence for anybody. So the panel can refuse a bad licence and cannot
-    | issue a good one.
-    |
-    | If this value and the shop system's ever drift apart, the panel will
-    | verify a licence the shops reject, or reject one they accept. They are
-    | checked against each other by LicencePublicKeyTest.
+    | The PUBLIC half only. PANEL_DOC Section 6: "The private key never reaches
+    | the server. A break-in on soranstore.com must never be able to forge a
+    | licence for anybody." Nothing in this panel signs anything — it verifies,
+    | and Soran's own machine signs.
     |
     */
 
@@ -30,5 +26,18 @@ nt7FZWnPJg8XyIfjn+T3gGL2qLweG/goErWHP6WJXys3yB8qR4oup6m5jiA0S/mv
 XrlDZBusilPfTS+1FWfW/kgPftbHcyTq8JXsgaXATpQzfkOA3UNH+0j7aSsb0RuY
 wMTRd7I3p+ZADqxKuVOxJ0ip9VQFyzBBACMsR8grDOmRNWb8fDtTqiuJsQZFBwkS
 ZwIDAQAB'),
+
+    /*
+    |---------------------------------------------------------------------------
+    | The command Soran runs on his own machine
+    |---------------------------------------------------------------------------
+    |
+    | Shown on the Renew screen for copying. The path is his, not the server's,
+    | and it is a setting because it is the one part of the instruction the
+    | panel cannot know.
+    |
+    */
+
+    'private_key_path' => env('PANEL_PRIVATE_KEY_PATH', 'C:\\soran-keys\\private.pem'),
 
 ];

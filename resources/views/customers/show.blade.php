@@ -359,8 +359,20 @@
         <i class="bi bi-exclamation-triangle me-2"></i>Danger zone
     </div>
     <ul class="list-group list-group-flush">
+        <li class="list-group-item d-flex flex-wrap justify-content-between align-items-center gap-2">
+            <span>
+                <span class="d-block">Renew the licence</span>
+                <small class="text-secondary">
+                    You run the signing command on your own machine and paste the result back.
+                    Checked here before anything is written.
+                </small>
+            </span>
+            <a href="{{ route('customers.renew', $customer) }}" class="btn btn-sm btn-outline-danger">
+                Renew…
+            </a>
+        </li>
+
         @foreach ([
-            ['Renew the licence', 'Issue a new licence and deliver it to this shop.', 'build order step 6'],
             ['Change the storage limit', 'Write a new limit into the shop’s .env. Logged, from → to.', 'build order step 7'],
             [$customer->status === 'suspended' ? 'Resume this shop' : 'Suspend this shop', 'Hold to confirm, and type the shop’s name.', 'build order step 7'],
             ['Run this shop’s migrations', 'A backup is taken first. Hold to confirm.', 'build order step 7'],

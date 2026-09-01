@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Contracts\ShopReader;
 use App\Models\Customer;
 use App\Support\ReadOnlyConnection;
+use App\Support\ShopEnvironment;
 use App\Support\ShopReading;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Config;
@@ -42,15 +43,6 @@ class LocalShopReader implements ShopReader
      */
     private const TIMEOUT = 120;
 
-    /**
-     * Anything shaped like framework configuration. Matched against the
-     * panel's own environment, and removed from the shop's.
-     */
-    private const FRAMEWORK_KEYS =
-        '/^(APP|DB|CACHE|SESSION|QUEUE|MAIL|LOG|REDIS|BROADCAST|FILESYSTEM|LICENCE|'
-        .'STORAGE_LIMIT|BACKUP|VITE|BCRYPT|MEMCACHED|AWS|PANEL|MYSQL|MYSQLDUMP|ADMIN)_|'
-        .'^(APP_KEY|FILESYSTEM_DISK|STORAGE_LIMIT_MB)$/';
-
     public function read(Customer $customer): ShopReading
     {
         $problems = [];
@@ -85,6 +77,18 @@ class LocalShopReader implements ShopReader
             dataCheckTotal: $opinion['data_check_total'] ?? null,
             problems: $problems,
         );
+    }
+
+    public function licenceState(Customer $customer): ?string
+    {
+        $problems = [];
+        $artisan = rtrim($customer->shop_home, '/').'/artisan';
+
+        if (! is_file($artisan)) {
+            return null;
+        }
+
+        return $this->json($artisan, ['licence:show', '--json'], $problems)['state'] ?? null;
     }
 
     /**
@@ -366,83 +370,6 @@ class LocalShopReader implements ShopReader
     }
 
     /**
-     * Everything of the panel's own that must not reach the shop's process.
-     *
-     * This was a real bug, and a bad one. A child process inherits its parent's
-     * environment, and Laravel puts every key of its .env there — so the shop's
-     * artisan booted with the PANEL's DB_DATABASE, DB_USERNAME and DB_PASSWORD,
-     * and an environment variable beats the .env file beside it. The shop
-     * reported 3 of 32 migrations run and 0 of 17 checks passing, and both
-     * numbers were true: it was looking at the panel's database, where exactly
-     * three of its migration names happen to also exist.
-     *
-     * Read-only commands made that a wrong reading. Section 7 has the panel run
-     * a shop's migrations and its backups too, and the same leak there would
-     * have pointed `migrate` at the panel's own database — the customer list,
-     * the licence history and the payment record.
-     *
-     * Symfony merges what is given here into the inherited environment, and
-     * `false` means remove. So every key the panel's own .env defines is
-     * removed by name, and anything else shaped like framework configuration
-     * goes with it, in case the panel is ever run with variables set outside
-     * its .env — which is exactly what a cPanel cron job does.
-     *
-     * @return array<string, false>
-     */
-    private function withoutThePanelsEnvironment(): array
-    {
-        $clear = [];
-
-        foreach (array_keys($_ENV + $_SERVER) as $key) {
-            if (! is_string($key)) {
-                continue;
-            }
-
-            if (preg_match(self::FRAMEWORK_KEYS, $key)) {
-                $clear[$key] = false;
-            }
-        }
-
-        // And whatever else this particular .env names, whether or not it looks
-        // like framework configuration.
-        foreach ($this->panelEnvKeys() as $key) {
-            $clear[$key] = false;
-        }
-
-        return $clear;
-    }
-
-    /**
-     * The key names in the panel's own .env, if it has one.
-     *
-     * A cached config means Laravel never read the file and never exported it,
-     * so there is nothing to clear — but reading the names costs nothing and
-     * covers the case where it did.
-     *
-     * @return list<string>
-     */
-    private function panelEnvKeys(): array
-    {
-        $path = base_path('.env');
-
-        if (! is_readable($path)) {
-            return [];
-        }
-
-        $keys = [];
-
-        foreach (file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {
-            $line = trim($line);
-
-            if ($line !== '' && ! str_starts_with($line, '#') && str_contains($line, '=')) {
-                $keys[] = trim(explode('=', $line, 2)[0]);
-            }
-        }
-
-        return $keys;
-    }
-
-    /**
      * @param  list<string>  $command
      * @param  list<string>  $problems
      */
@@ -450,7 +377,7 @@ class LocalShopReader implements ShopReader
     {
         $process = new Process(
             [PHP_BINARY, $artisan, ...$command],
-            env: $this->withoutThePanelsEnvironment(),
+            env: ShopEnvironment::withoutThePanel(),
         );
         $process->setTimeout(self::TIMEOUT);
 
