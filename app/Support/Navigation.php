@@ -26,7 +26,7 @@ final class Navigation
             ['label' => 'Customers',      'icon' => 'bi-shop',           'route' => null,       'step' => 'build order step 5'],
             ['label' => 'Subscriptions',  'icon' => 'bi-cash-coin',      'route' => null,       'step' => 'build order step 8'],
             ['label' => 'Health',         'icon' => 'bi-graph-up',    'route' => null,       'step' => 'build order step 4'],
-            ['label' => 'What I changed', 'icon' => 'bi-clock-history',  'route' => null,       'step' => 'build order step 3'],
+            ['label' => 'What I changed', 'icon' => 'bi-clock-history',  'route' => null,       'step' => 'the table is built; the screen comes with the others'],
         ];
     }
 }
