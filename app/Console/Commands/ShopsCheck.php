@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Contracts\ShopReader;
 use App\Models\Customer;
 use App\Models\HealthCheck;
+use App\Support\Bytes;
 use App\Support\ShopReading;
 use Illuminate\Console\Command;
 use Illuminate\Database\Eloquent\Collection;
@@ -100,7 +101,7 @@ class ShopsCheck extends Command
         $this->components->twoColumnDetail($customer->host, sprintf(
             '<fg=green>%s</> · %s · %d products',
             $reading->licenceState ?? 'licence unknown',
-            $this->readable(
+            Bytes::human(
                 (int) $reading->databaseBytes + (int) $reading->backupsBytes + (int) $reading->uploadsBytes,
             ),
             (int) $reading->productsCount,
@@ -113,21 +114,6 @@ class ShopsCheck extends Command
         }
 
         return true;
-    }
-
-    private function readable(int $bytes): string
-    {
-        $size = (float) $bytes;
-
-        foreach (['B', 'KB', 'MB', 'GB'] as $unit) {
-            if ($size < 1024 || $unit === 'GB') {
-                return round($size, 1).' '.$unit;
-            }
-
-            $size /= 1024;
-        }
-
-        return $bytes.' B';
     }
 
     /** @return Collection<int, Customer> */

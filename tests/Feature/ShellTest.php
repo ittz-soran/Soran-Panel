@@ -15,12 +15,19 @@ class ShellTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_the_overview_says_what_it_cannot_answer_yet(): void
+    /**
+     * The Overview's empty state, now that it is the real screen rather than
+     * the scaffold's placeholder. Still the same point: with nothing recorded
+     * it says so, because three zeroes would read as "nothing needs you", which
+     * is a different and untrue statement.
+     */
+    public function test_the_overview_says_when_there_is_nothing_recorded(): void
     {
         $this->actingAs(User::factory()->create())
             ->get('/overview')
             ->assertOk()
-            ->assertSee('Nothing to show yet');
+            ->assertSee('No customers yet')
+            ->assertDontSee('Nothing needs you this week');
     }
 
     /**

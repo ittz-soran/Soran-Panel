@@ -98,6 +98,28 @@ class Customer extends Model
         return $this->hasOne(HealthCheck::class)->latestOfMany('checked_at');
     }
 
+    /**
+     * The last check that actually read the shop — which is not always the last
+     * check.
+     *
+     * Section 5 keeps snapshots in a table rather than columns on this row for
+     * exactly this reason: "a failed check must not wipe the last good
+     * reading". A screen that then shows nothing but "unknown" the moment a
+     * shop goes down throws that away and makes the table pointless — and it is
+     * when a shop has just gone down that somebody most wants to know how much
+     * disk it was using an hour ago.
+     *
+     * So the screens read the state from latestHealthCheck and the numbers from
+     * here, and say when the two are not the same check.
+     */
+    public function lastGoodHealthCheck(): HasOne
+    {
+        return $this->hasOne(HealthCheck::class)->ofMany(
+            ['checked_at' => 'max', 'id' => 'max'],
+            fn ($query) => $query->where('reachable', true),
+        );
+    }
+
     public function actions(): HasMany
     {
         return $this->hasMany(Action::class);
@@ -141,6 +163,77 @@ class Customer extends Model
                 ->whereNotNull('expires_on')
                 ->whereDate('expires_on', '<=', now()->addDays($days)),
         );
+    }
+
+    /**
+     * Shops whose disk is nearly full — Section 9's Overview.
+     *
+     * Asked of the newest reading only. An older check that was over the line
+     * says nothing about today, and a shop that has since had its backups
+     * pruned would otherwise stay on the list for ever.
+     *
+     * A shop the check could not reach is not on this list. We do not know how
+     * full it is, and guessing "fine" and guessing "full" are both worse than
+     * the Health screen saying it could not be read.
+     *
+     * @param  Builder<Customer>  $query
+     */
+    public function scopeStorageOver(Builder $query, ?int $percent = null): void
+    {
+        $percent ??= config('panel.attention.storage_percent');
+
+        $query->live()->whereHas('latestHealthCheck', fn ($check) => $check
+            ->where('reachable', true)
+            ->whereNotNull('storage_limit_mb')
+            ->where('storage_limit_mb', '>', 0)
+            ->whereRaw(
+                '(coalesce(database_bytes, 0) + coalesce(backups_bytes, 0) + coalesce(uploads_bytes, 0))'
+                .' >= (storage_limit_mb * 1048576 * ? / 100)',
+                [$percent],
+            ));
+    }
+
+    /**
+     * Shops nobody has opened — Section 9's Overview.
+     *
+     * A shop that has never been used at all counts, but only once it has been
+     * running longer than the window. A shop provisioned this morning has no
+     * activity yet and that is not a problem; the same shop three weeks later
+     * is one, and it is the more serious kind — somebody paid and never
+     * started.
+     *
+     * @param  Builder<Customer>  $query
+     */
+    public function scopeUnusedFor(Builder $query, ?int $days = null): void
+    {
+        $days ??= config('panel.attention.unused_days');
+        $since = now()->subDays($days);
+
+        $query->live()->whereHas('latestHealthCheck', fn ($check) => $check
+            ->where('reachable', true)
+            ->where(fn ($either) => $either
+                ->where('last_activity_at', '<', $since)
+                ->orWhere(fn ($never) => $never
+                    ->whereNull('last_activity_at')
+                    ->whereHas('customer', fn ($c) => $c->whereDate('started_on', '<', $since)))));
+    }
+
+    /**
+     * Everything that needs Soran — the Customers screen's one filter.
+     *
+     * Exactly the union of the Overview's three lists, deliberately. Two
+     * different answers to "who needs me" is one answer too many: the Overview
+     * would say four shops and the filter show five, and after that neither
+     * gets believed.
+     *
+     * @param  Builder<Customer>  $query
+     */
+    public function scopeNeedsChasing(Builder $query): void
+    {
+        $query->live()->where(fn ($any) => $any
+            ->whereIn('id', Customer::select('id')->licenceExpiringWithin(config('panel.attention.licence_days')))
+            ->orWhereIn('id', Customer::select('id')->storageOver())
+            ->orWhereIn('id', Customer::select('id')->unusedFor()));
     }
 
     /**
