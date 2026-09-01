@@ -16,6 +16,28 @@ class FirstOperatorTest extends TestCase
 {
     use RefreshDatabase;
 
+    /**
+     * The keys the seeder reads are really in config/panel.php.
+     *
+     * Every other test here injects the config with config()->set, which proves
+     * the seeder's logic and not that there is anything for it to read. During
+     * step 5 config/panel.php was overwritten and `first_operator` disappeared:
+     * the whole suite stayed green, and a freshly migrated panel had nobody who
+     * could sign in. The seeder reads config rather than env on purpose —
+     * env() returns null once config:cache has run — so the keys going missing
+     * looks exactly like a working deploy until somebody tries the login page.
+     */
+    public function test_the_keys_the_seeder_reads_are_really_in_the_config_file(): void
+    {
+        $operator = config('panel.first_operator');
+
+        $this->assertIsArray($operator, 'config/panel.php has no first_operator at all');
+
+        foreach (['name', 'email', 'password'] as $key) {
+            $this->assertArrayHasKey($key, $operator);
+        }
+    }
+
     public function test_it_creates_the_operator_named_in_the_environment(): void
     {
         config()->set('panel.first_operator', [
