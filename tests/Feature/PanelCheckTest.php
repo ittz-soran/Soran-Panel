@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\User;
+use Dotenv\Dotenv;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -234,5 +235,77 @@ class PanelCheckTest extends TestCase
             file_get_contents(public_path('.htaccess')),
             'the root denial cascades into public/, so it has to be granted back',
         );
+    }
+    // ---- The template itself ----------------------------------------------
+
+    /**
+     * `.env.example` has to be a file dotenv can actually read.
+     *
+     * It is not documentation: CI does `cp .env.example .env` before anything
+     * else, and DEPLOY.md step 2 tells Soran to do the same on the server. One
+     * bad value does not spoil one setting — dotenv refuses the WHOLE file, so
+     * `key:generate` fails and nothing after it runs.
+     *
+     * That happened. A Windows path was written in double quotes, where dotenv
+     * reads \s and \p as escape sequences it does not recognise, and both CI
+     * jobs went red on a file no test had ever opened.
+     */
+    public function test_the_env_example_is_a_file_dotenv_can_read(): void
+    {
+        $path = base_path('.env.example');
+
+        $this->assertFileExists($path, 'DEPLOY.md step 2 is `cp .env.example .env`');
+
+        try {
+            $values = Dotenv::parse((string) file_get_contents($path));
+        } catch (\Throwable $e) {
+            $this->fail('.env.example does not parse, so `cp .env.example .env` breaks: '.$e->getMessage());
+        }
+
+        // And the keys the panel cannot start without are named in it.
+        foreach ([
+            'APP_KEY', 'DB_DATABASE', 'PANEL_ADMIN_EMAIL', 'PANEL_ADMIN_PASSWORD',
+            'PANEL_SHOPS_HOME', 'PANEL_SHOPS_PUBLIC', 'PANEL_SHARED_ARTISAN', 'PANEL_DATABASE_MAKER',
+        ] as $key) {
+            $this->assertArrayHasKey($key, $values, "[{$key}] is not in .env.example");
+        }
+    }
+
+    /**
+     * A key that config/licence.php has a default for must not be SET-BUT-EMPTY
+     * in the template.
+     *
+     * `env('X', 'default')` returns the default when X is absent and an empty
+     * string when X is present and blank. So a commented-out line falls back to
+     * the committed key, and `LICENCE_PUBLIC_KEY=` leaves the panel holding no
+     * key at all — refusing every licence pasted into it as "not signed by your
+     * key", with no hint why.
+     *
+     * The .env.example comment claimed the opposite until CI, running with the
+     * template as its .env, failed on it.
+     */
+    public function test_the_env_example_does_not_blank_a_key_that_has_a_default(): void
+    {
+        $values = Dotenv::parse((string) file_get_contents(base_path('.env.example')));
+
+        $this->assertArrayNotHasKey(
+            'LICENCE_PUBLIC_KEY',
+            $values,
+            'LICENCE_PUBLIC_KEY is set in .env.example. Blank, it overrides the committed default and the '
+            .'panel can verify nothing. Comment the line out instead.',
+        );
+    }
+
+    /** A template that shipped a real secret would be a secret in the repository. */
+    public function test_the_env_example_carries_no_credentials(): void
+    {
+        $values = Dotenv::parse((string) file_get_contents(base_path('.env.example')));
+
+        foreach ([
+            'APP_KEY', 'DB_PASSWORD', 'DB_USERNAME', 'PANEL_ADMIN_PASSWORD',
+            'PANEL_ADMIN_EMAIL', 'PANEL_MAKER_PASSWORD', 'PANEL_MAKER_USERNAME',
+        ] as $key) {
+            $this->assertSame('', (string) ($values[$key] ?? ''), "[{$key}] has a real value in .env.example");
+        }
     }
 }
