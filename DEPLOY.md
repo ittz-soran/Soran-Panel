@@ -191,11 +191,46 @@ cd ~
 git clone https://github.com/ittz-soran/systemmanagment.git smart-store
 cd smart-store
 composer install --no-dev --optimize-autoloader
-npm install && npm run build          # builds public/build — needed by the panel too
 ```
 
-⚠️ If npm is not available on the account, build `public/build` on your own
-machine and upload it.
+### The compiled assets
+
+`public/build` is not in the repository — it is built, not written — and **every
+shop and the panel read their entire appearance from it**. Without it every
+screen loads as unstyled HTML.
+
+Try to build it on the server:
+
+```bash
+npm install && npm run build
+```
+
+⚠️ **`npm: command not found` is the normal answer on shared hosting**, and it
+is not a problem to solve on the server. Two ways past it:
+
+**Upload a built copy.** Ask for `build.tar.gz`, put it in `~/smart-store/public`
+with cPanel's File Manager, and:
+
+```bash
+cd ~/smart-store/public && tar -xzf build.tar.gz && rm build.tar.gz
+```
+
+**Or use cPanel's own Node.** If the account has **Setup Node.js App**
+(CloudLinux's selector), create an application pointed at `~/smart-store`, then
+use the "Run NPM Install" button and its shell — `npm run build` works from
+there. Worth doing if you would rather not upload a folder every time the
+appearance changes.
+
+**Check** — the manifest and at least one stylesheet:
+
+```bash
+ls ~/smart-store/public/build/manifest.json
+ls ~/smart-store/public/build/assets/*.css
+```
+
+⚠️ **Rebuild whenever the shop system's front end changes.** `git pull` brings
+the source, not the compiled output — a pull that changes a stylesheet and no
+new `build/` leaves every shop looking at the old one.
 
 **Check:** `php artisan list | grep shop:provision` prints the command.
 
