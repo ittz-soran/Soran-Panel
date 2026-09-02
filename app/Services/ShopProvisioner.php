@@ -235,7 +235,7 @@ class ShopProvisioner
             $artisan = rtrim($paths['home'], '/').'/artisan';
 
             if ($wanted['backup']) {
-                $this->backUpFirst($artisan);
+                $warnings = [...$warnings, ...$this->backUpFirst($artisan)];
             } else {
                 $warnings[] = 'No backup was taken before migrating, because you said you already had one.';
             }
@@ -425,21 +425,57 @@ class ShopProvisioner
      * Not the panel's idea of a backup: the shop system already knows how to
      * dump itself and where its copies go, and a restore later will expect that
      * shape.
+     *
+     * ⚠️ **Deliberately not gated on `backup:check`.** That was the first
+     * attempt, and driving it against a real shop showed why it cannot be:
+     * `backup:check` diagnoses the ongoing REGIME — is an off-machine folder
+     * set, have backups run before — and both are necessarily false for a
+     * folder the panel built ninety seconds ago, however perfectly dumpable
+     * their database is. So it refused every single take-on, which leaves the
+     * operator one way forward: untick the box. A rule that can only be
+     * satisfied by skipping the backup teaches people to skip backups, in the
+     * one flow that most needs one.
+     *
+     * What matters here is narrower and testable: **a dump, now, that landed.**
+     * That is `backup:run` succeeding. If their database cannot be dumped at
+     * all — no mysqldump, an unwritable folder — `backup:run` is what fails,
+     * and its own output says which.
+     *
+     * The regime is still worth knowing about, so it is asked afterwards and
+     * comes back as a warning. Something for the operator to fix, not a reason
+     * to refuse a migration that has already been backed up.
+     *
+     * @return list<string> anything worth saying afterwards
      */
-    private function backUpFirst(string $artisan): void
+    private function backUpFirst(string $artisan): array
     {
+        $backup = $this->run(
+            [PHP_BINARY, $artisan, 'backup:run'],
+            'backing their database up before touching it',
+        );
+
         $check = new Process([PHP_BINARY, $artisan, 'backup:check'], env: ShopEnvironment::withoutThePanel());
         $check->setTimeout(self::TIMEOUT);
         $check->run();
 
+        $warnings = [];
+
         if (! $check->isSuccessful()) {
-            throw new RuntimeException(
-                'Their backups are not working, so nothing has been migrated. The shop said: '
-                .mb_substr(trim($check->getOutput() ?: $check->getErrorOutput()), -400),
-            );
+            $warnings[] = 'Their database was backed up, but their backups are not set up to keep running — '
+                .'no off-machine copy, most likely, because this folder is new. Run `backup:check` on the shop '
+                .'and set it up before they rely on it.';
         }
 
-        $this->run([PHP_BINARY, $artisan, 'backup:run'], 'backing their database up before touching it');
+        /*
+         * Where it went, said out loud. If the migration goes wrong an hour
+         * from now, the first question is "where is the backup" and the answer
+         * should not be somewhere in a log nobody kept.
+         */
+        if (preg_match('#^\s*(\S+\.(?:sql|zip|gz|sql\.gz))\s#mi', $backup, $where) === 1) {
+            $warnings[] = 'Their backup is at '.$where[1].'.';
+        }
+
+        return $warnings;
     }
 
     /** How many migrations the shop has run, so the difference can be reported. */

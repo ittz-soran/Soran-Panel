@@ -9,6 +9,7 @@ use App\Http\Controllers\NewCustomerController;
 use App\Http\Controllers\OperatorController;
 use App\Http\Controllers\OverviewController;
 use App\Http\Controllers\SubscriptionController;
+use App\Http\Controllers\TakeOnController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -30,6 +31,12 @@ Route::middleware('auth')->group(function () {
     // Step 7. Before {customer}, or `new` is read as a customer's id.
     Route::get('customers/new', [NewCustomerController::class, 'create'])->name('customers.create');
     Route::post('customers/new', [NewCustomerController::class, 'store'])->name('customers.store');
+
+    // Step 10, and the same reason for sitting above {customer}. A shop whose
+    // database is already there — Halabja-phone, whose folder was deleted and
+    // whose database was deliberately kept.
+    Route::get('customers/take-on', [TakeOnController::class, 'create'])->name('customers.take-on');
+    Route::post('customers/take-on', [TakeOnController::class, 'store'])->name('customers.take-on.store');
     Route::get('customers/{customer}', [CustomerController::class, 'show'])->name('customers.show');
 
     // Renew — Section 6. The panel shows a command and takes a paste; it never

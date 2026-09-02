@@ -438,19 +438,29 @@ class TakeOnShopTest extends TestCase
         $this->assertSame(0, Customer::count());
     }
 
-    /** No backup, no migration. */
-    public function test_it_will_not_migrate_when_their_backups_are_broken(): void
+    /**
+     * A shop whose ongoing backups are not set up is still taken on, and told
+     * about — because `backup:check` asks about the REGIME (an off-machine
+     * copy, backups having run before) and both are necessarily false for a
+     * folder made ninety seconds ago. Refusing on it refused every take-on
+     * there could be, and left unticking the backup box as the only way
+     * forward. What must not be skipped is the dump, and that is its own test
+     * below.
+     */
+    public function test_backups_that_are_not_set_up_are_a_warning_and_not_a_refusal(): void
     {
         $this->withEnvironment('BACKUPS_BROKEN', function () {
-            try {
-                $this->takeOn();
-                $this->fail('it migrated without a working backup');
-            } catch (RuntimeException $e) {
-                $this->assertStringContainsString('backups are not working', $e->getMessage());
-            }
+            $made = $this->takeOn();
+
+            $this->assertStringContainsString(
+                'not set up to keep running',
+                implode(' ', $made['warnings']),
+            );
         });
 
-        $this->assertFileDoesNotExist($this->root.'/migrate-was-run');
+        // Their database WAS dumped, and the migration went ahead.
+        $this->assertFileExists($this->root.'/backup-was-taken');
+        $this->assertFileExists($this->root.'/migrate-was-run');
         $this->assertSame(3, $this->theirRows('sales'));
     }
 
@@ -462,6 +472,7 @@ class TakeOnShopTest extends TestCase
      * child never saw, so the backup "succeeded", nothing threw, and the test
      * failed while the code under it was fine.
      */
+    /** The dump itself. Nothing is migrated without one. */
     public function test_a_backup_that_fails_stops_everything(): void
     {
         $this->withEnvironment('DUMP_MUST_FAIL', function () {
