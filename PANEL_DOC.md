@@ -352,7 +352,11 @@ that unlikely rather than impossible.
 7. **New customer** — UAPI database creation, provision, seed, issue. **Done 2026-09-01**, along with operators, storage limits and suspend/resume. Not `install:sql` — see Section 7. ⚠️ The cPanel UAPI half has not been run against a real cPanel account; the first customer created on the server is what proves it.
 8. **Subscriptions and payments.** **Done 2026-09-01**, with Health and What I changed — the two Section 9 pages this list never gave a step of their own. Also `panel:check`, which says whether a machine is set up to run the panel at all.
 9. **Deploy** — `smart-store` and `panel` on the server, `panel.soranstore.com`. **Prepared 2026-09-02:** `DEPLOY.md` is the checklist, `panel:public` writes the panel's public folder, and `panel:check` says whether the machine is ready. The steps that need the real cPanel account are marked ⚠️ and are Soran's to run.
-10. **Soran's own shop first**, then Halabja-phone rebuilt through the panel.
+10. **Soran's own shop, created through the panel on the server.** The screen for
+    taking on a shop whose database already exists was built for Halabja-phone and
+    is finished and tested — but **Soran no longer works for them (2026-09-02)**, so
+    step 10 is now one thing: his own shop, from nothing, on the real account. That
+    is also what proves the cPanel UAPI half of step 7.
 
 ---
 
@@ -393,9 +397,11 @@ that unlikely rather than impossible.
 - **The `sys` folder at `/home/soransto/sys`** — it was a mistake and has been
   deleted. Nothing depended on it.
 - **The inode allowance** — `48,130 / ∞`. No limit. Section 3 is corrected.
-- **Backups** — Soran has a backup of Halabja-phone, so their trading history
-  survives the folder being deleted. Its **database must stay in cPanel**: that
-  is what a rebuilt install restores from.
+- **Halabja-phone** — no longer a customer as of 2026-09-02. Their database no
+  longer has to be kept, and nothing in the build order waits on them. The
+  panel's *Take on an existing shop* screen was built for their situation and
+  stays: it is the door any shop with a database and no folder comes in
+  through, which is the shape every rebuild and every migration-in takes.
 - **Backups of the panel's own database** — it holds the customer list, the
   licence history and the payment record, and losing it is worse than losing
   any one shop. It reuses the shop system's `BackupService`, nightly, with the

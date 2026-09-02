@@ -15,6 +15,142 @@ creating a customer.
 
 ---
 
+## Step 0. Your account's real name
+
+Every path below is written as `/home/soransto/…`. That is a guess at your cPanel
+username, and if it is wrong every path is wrong. Open cPanel → **Terminal** and
+run:
+
+```bash
+echo $HOME
+```
+
+Whatever it prints is the folder everything below lives in. If it is not
+`/home/soransto`, substitute it everywhere — including in the `.env` values,
+which are absolute paths and will not fall back to anything sensible.
+
+If there is no **Terminal** in cPanel, stop here and tell me: without shell
+access the whole approach changes, because `composer`, `artisan` and
+`shop:provision` all need one.
+
+---
+
+## Step 0b. Getting the code onto the box
+
+Both repositories are private, and **GitHub stopped accepting passwords for git
+in 2021** — `git clone https://…` asks for a username and password and then
+refuses whatever you type:
+
+```
+remote: Invalid username or token. Password authentication is not supported.
+```
+
+Two ways round it. Neither could be tested from here, so the checks below are
+worth actually running.
+
+### A. A fine-grained token — start here
+
+It goes over HTTPS on port 443, which is never blocked. Shared hosting often
+blocks outbound port 22, which is what option B needs.
+
+Make it at **github.com/settings/personal-access-tokens/new**:
+
+| Field | What to set |
+|---|---|
+| Repository access | **Only select repositories** → `systemmanagment` and `Soran-Panel` |
+| Permissions → Contents | **Read-only** |
+| Expiration | A year is fine; note the date |
+
+⚠️ **Not a classic token.** A classic one with `repo` scope can write to every
+repository you own, from a shared machine you do not watch. A fine-grained
+read-only token on two repositories is as narrow as a deploy key.
+
+On the server, store it once:
+
+```bash
+git config --global credential.helper store
+```
+
+Then clone as normal. Git asks once per host: username `ittz-soran`, password
+**the token** (not your GitHub password).
+
+⚠️ That writes the token to `~/.git-credentials` in plain text. Lock it down —
+it is outside `public_html`, so no URL reaches it, but the file mode is worth
+setting anyway:
+
+```bash
+chmod 600 ~/.git-credentials
+```
+
+⚠️ **Do not put the token in the remote URL** (`https://TOKEN@github.com/…`). It
+lands in `.git/config`, gets copied by every backup, and shows up in `git remote
+-v` output you might paste somewhere.
+
+### B. Read-only deploy keys — tidier, if port 22 is open
+
+A deploy key reads exactly one repository and nothing else on your account, and
+never expires. It needs SSH out to GitHub.
+
+```bash
+mkdir -p ~/.ssh && chmod 700 ~/.ssh
+ssh-keygen -t ed25519 -f ~/.ssh/id_shop  -N '' -C 'soransto shop system'
+ssh-keygen -t ed25519 -f ~/.ssh/id_panel -N '' -C 'soransto panel'
+chmod 600 ~/.ssh/id_shop ~/.ssh/id_panel
+```
+
+A deploy key belongs to one repository, so give each its own alias:
+
+```bash
+cat >> ~/.ssh/config <<'EOF'
+
+Host github-shop
+  HostName github.com
+  User git
+  IdentityFile ~/.ssh/id_shop
+  IdentitiesOnly yes
+
+Host github-panel
+  HostName github.com
+  User git
+  IdentityFile ~/.ssh/id_panel
+  IdentitiesOnly yes
+EOF
+chmod 600 ~/.ssh/config
+```
+
+Print each public key and add it under **Settings → Deploy keys → Add deploy
+key** on its own repository:
+
+```bash
+cat ~/.ssh/id_shop.pub     # → github.com/ittz-soran/systemmanagment/settings/keys
+cat ~/.ssh/id_panel.pub    # → github.com/ittz-soran/Soran-Panel/settings/keys
+```
+
+⚠️ **Leave "Allow write access" unticked.** The server only ever reads. A deploy
+key that can write is one that can rewrite your shop system from a machine
+nobody is watching.
+
+**Check** — each should greet you by repository name and then refuse a shell,
+which is success:
+
+```bash
+ssh -T git@github-shop
+ssh -T git@github-panel
+```
+
+⚠️ If those hang or say "connection refused", the host blocks port 22. GitHub
+also answers SSH on 443 — add `Port 443` and change `HostName` to
+`ssh.github.com` in both blocks — or use option A instead.
+
+With deploy keys, clone using the aliases:
+
+```bash
+git clone git@github-shop:ittz-soran/systemmanagment.git smart-store
+git clone git@github-panel:ittz-soran/Soran-Panel.git panel
+```
+
+---
+
 ## What ends up where
 
 Section 4 measured that **a document root cannot leave `public_html`** — cPanel
@@ -47,16 +183,54 @@ account that may create and drop databases.
 
 ## 1. The shop system
 
+The URL below is the token form (option A in step 0b). On deploy keys it is
+`git@github-shop:ittz-soran/systemmanagment.git`.
+
 ```bash
 cd ~
-git clone <your repo> smart-store
+git clone https://github.com/ittz-soran/systemmanagment.git smart-store
 cd smart-store
 composer install --no-dev --optimize-autoloader
-npm install && npm run build          # builds public/build — needed by the panel too
 ```
 
-⚠️ If npm is not available on the account, build `public/build` on your own
-machine and upload it.
+### The compiled assets
+
+`public/build` is not in the repository — it is built, not written — and **every
+shop and the panel read their entire appearance from it**. Without it every
+screen loads as unstyled HTML.
+
+Try to build it on the server:
+
+```bash
+npm install && npm run build
+```
+
+⚠️ **`npm: command not found` is the normal answer on shared hosting**, and it
+is not a problem to solve on the server. Two ways past it:
+
+**Upload a built copy.** Ask for `build.tar.gz`, put it in `~/smart-store/public`
+with cPanel's File Manager, and:
+
+```bash
+cd ~/smart-store/public && tar -xzf build.tar.gz && rm build.tar.gz
+```
+
+**Or use cPanel's own Node.** If the account has **Setup Node.js App**
+(CloudLinux's selector), create an application pointed at `~/smart-store`, then
+use the "Run NPM Install" button and its shell — `npm run build` works from
+there. Worth doing if you would rather not upload a folder every time the
+appearance changes.
+
+**Check** — the manifest and at least one stylesheet:
+
+```bash
+ls ~/smart-store/public/build/manifest.json
+ls ~/smart-store/public/build/assets/*.css
+```
+
+⚠️ **Rebuild whenever the shop system's front end changes.** `git pull` brings
+the source, not the compiled output — a pull that changes a stylesheet and no
+new `build/` leaves every shop looking at the old one.
 
 **Check:** `php artisan list | grep shop:provision` prints the command.
 
@@ -64,9 +238,11 @@ machine and upload it.
 
 ## 2. The panel
 
+On deploy keys the URL is `git@github-panel:ittz-soran/Soran-Panel.git`.
+
 ```bash
 cd ~
-git clone <panel repo> panel
+git clone https://github.com/ittz-soran/Soran-Panel.git panel
 cd panel
 composer install --no-dev --optimize-autoloader
 cp .env.example .env
@@ -194,7 +370,49 @@ account, and cPanel sometimes wants `/usr/local/bin/ea-php83`.
 
 ---
 
-## 8. Speed, last
+## 8. Your own shop, through the panel
+
+Build order step 10, and the last one. **Customers → New customer**, filled in
+for your own shop.
+
+This is also what proves the **cPanel UAPI** half of database creation. It is
+the one piece of the panel that has never run against a real cPanel account: it
+is written from cPanel's documented API and Section 4's measurement, and its
+tests drive a fake. If a call name is wrong you will see cPanel's own error text
+on the screen, and **nothing will be left half-made** — the rollback is tested,
+and it takes back the database, the database user and both folders.
+
+Fill it in like this:
+
+| Field | What to put |
+|---|---|
+| Shop name | Your shop, as it should read on its own screen |
+| Short name | Lower-case letters and numbers. Becomes the folder, `<short>_shop` and `<short>_user`, and **cannot be changed later** |
+| Domain | The subdomain — create it in cPanel **first**, pointing at `/home/soransto/public_html/<short>` |
+| How they start | **On a free trial.** Nothing signed, nothing to paste, and it proves the whole path works before a licence is involved |
+
+Then, once it is trading:
+
+1. Sign in to the shop itself and check it works — it is a real install.
+2. On your own machine, run `licence:issue --host=<your subdomain>`.
+3. In the panel, **Renew**, and paste it. The panel verifies, writes, clears the
+   shop's cache, and asks the shop what it now thinks. `valid` on screen means
+   the whole licence path works end to end on the real host.
+
+> **Create the subdomain first, then the customer.** cPanel creates the
+> document root when you create the subdomain, and the panel writes into it.
+>
+> Writing this checklist is what found that the panel could not do that: it
+> refused any public folder that already existed, so making the subdomain first
+> deadlocked it, and making the customer first left cPanel to find the folder
+> taken. Neither order worked. An empty document root — or one holding nothing
+> but `cgi-bin` and `.well-known` — is now written into, and a folder with
+> anything else in it is still refused, because that is somebody's site. If the
+> panel does refuse, the message names the folder.
+
+---
+
+## 9. Speed, last
 
 ```bash
 php artisan config:cache
@@ -211,25 +429,11 @@ back.
 
 ---
 
-## Then, Soran's own shop
-
-Build order step 10: your own shop first, then Halabja-phone rebuilt through the
-panel. Halabja's database must be kept — Section 13 — so that one is a restore
-into a shop the panel provisions, not a fresh start.
-
-The first customer created on the server is also what proves the **cPanel UAPI**
-half of database creation. It is the one piece of the panel that has never run
-against real cPanel: it is written from cPanel's documented API and Section 4's
-measurement, and its tests drive a fake. If a call name is wrong you will see
-cPanel's own error text on the screen, and nothing will be left half-made — the
-rollback is tested.
-
----
-
 ## If something goes wrong
 
 | What you see | Where to look |
 |---|---|
+| `git clone` asks for a password and then refuses it | GitHub has not accepted passwords for git since 2021. Step 0b — a token or a deploy key. |
 | Unstyled HTML | `public/build` is missing. Copy it from the shop system, then `panel:public` again. |
 | A 500 with no detail | `storage/logs/laravel.log`. `APP_DEBUG` stays off. |
 | `.env` visible in a browser | The code is inside the document root. Move it out and run `panel:public`. |

@@ -325,6 +325,87 @@ class NewCustomerTest extends TestCase
         $this->assertSame([], self::$created, 'the database was made before the folder was checked');
     }
 
+    /**
+     * ⚠️ The deadlock, and the reason this is three tests rather than one.
+     *
+     * Creating a subdomain in cPanel CREATES its document root, and that step
+     * has to come first — the domain must point somewhere before a shop is
+     * built for it. The first version refused any public folder that existed,
+     * which meant: make the subdomain first and the panel refuses, make the
+     * customer first and cPanel finds the folder taken. Neither order worked
+     * and the flow was unreachable on a real account. It could not have been
+     * found here, because nothing in a test creates a document root the way
+     * cPanel does.
+     */
+    public function test_the_empty_document_root_cpanel_makes_is_written_into(): void
+    {
+        mkdir($this->root.'/public_html/hawler', 0755, true);
+
+        $this->make()->assertSessionHas('success');
+
+        $this->assertSame(1, Customer::count());
+        $this->assertFileExists($this->root.'/shops/hawler/.env');
+    }
+
+    /** cPanel's own leftovers are not content, and neither is Let's Encrypt's. */
+    public function test_cgi_bin_and_well_known_do_not_count_as_something_being_there(): void
+    {
+        mkdir($this->root.'/public_html/hawler/cgi-bin', 0755, true);
+        mkdir($this->root.'/public_html/hawler/.well-known', 0755, true);
+
+        $this->make()->assertSessionHas('success');
+
+        $this->assertSame(1, Customer::count());
+    }
+
+    /** But a folder with somebody's site in it is still somebody's site. */
+    public function test_a_public_folder_with_anything_in_it_is_still_refused(): void
+    {
+        mkdir($this->root.'/public_html/hawler', 0755, true);
+        file_put_contents($this->root.'/public_html/hawler/index.html', 'somebody’s site');
+
+        $this->make()->assertSessionHas('warning');
+
+        $this->assertSame(0, Customer::count());
+        $this->assertSame([], self::$created, 'the database was made before the folder was checked');
+        $this->assertFileExists($this->root.'/public_html/hawler/index.html', 'it was written over');
+    }
+
+    /**
+     * And the other half: a rollback must not take a document root cPanel made
+     * with it. Removing it leaves the subdomain pointing at nothing, which is a
+     * worse mess than the half-made shop being cleaned up.
+     */
+    public function test_a_rollback_empties_a_document_root_it_did_not_make(): void
+    {
+        mkdir($this->root.'/public_html/hawler', 0755, true);
+
+        $this->withEnvironment('MIGRATE_MUST_FAIL', function () {
+            $this->make()->assertSessionHas('warning');
+        });
+
+        $this->assertSame(0, Customer::count());
+        $this->assertDirectoryDoesNotExist($this->root.'/shops/hawler');
+
+        // Still there for the subdomain, and empty.
+        $this->assertDirectoryExists($this->root.'/public_html/hawler');
+        $this->assertSame(
+            [],
+            array_diff((array) scandir($this->root.'/public_html/hawler'), ['.', '..']),
+            'the rolled-back shop’s files were left in the document root',
+        );
+    }
+
+    /** One the panel made itself is taken away completely, as before. */
+    public function test_a_rollback_removes_a_public_folder_it_did_make(): void
+    {
+        $this->withEnvironment('MIGRATE_MUST_FAIL', function () {
+            $this->make()->assertSessionHas('warning');
+        });
+
+        $this->assertDirectoryDoesNotExist($this->root.'/public_html/hawler');
+    }
+
     public function test_a_licence_is_required_when_that_is_how_they_start(): void
     {
         $this->make(['start' => 'licence', 'licence' => ''])->assertSessionHasErrors('licence');

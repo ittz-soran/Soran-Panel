@@ -81,7 +81,13 @@ class ShopProvisioner
         $password = Str::random(24);
 
         // What this run has made, in the order to undo it.
-        $made = ['database' => false, 'folder' => false];
+        /*
+         * `document_root` records whether THIS RUN made the public folder.
+         * Usually it did not: creating the subdomain in cPanel creates it, and
+         * that step has to come first. Rolling back must then empty it rather
+         * than remove it, or the subdomain is left pointing at nothing.
+         */
+        $made = ['database' => false, 'folder' => false, 'document_root' => ! is_dir($paths['public'])];
         $warnings = [];
 
         try {
@@ -194,6 +200,7 @@ class ShopProvisioner
         $paths = $this->paths($short);
         $warnings = [];
         $madeFolder = false;
+        $madeDocumentRoot = ! is_dir($paths['public']);
 
         try {
             $this->refuseIfAnythingIsInTheWay($paths, $wanted['host']);
@@ -277,10 +284,15 @@ class ShopProvisioner
             $left = [];
 
             if ($madeFolder) {
-                foreach ([$paths['public'], $paths['home']] as $path) {
-                    if (! $this->deleteFolder($path)) {
-                        $left[] = "the folder [{$path}]";
-                    }
+                // Their document root, if cPanel made it, is emptied and not
+                // removed — see rollBack(). A subdomain pointing at nothing is
+                // a worse mess than the half-made folder this is clearing.
+                if (! $this->deleteFolder($paths['public'], keepTheFolderItself: ! $madeDocumentRoot)) {
+                    $left[] = "the folder [{$paths['public']}]";
+                }
+
+                if (! $this->deleteFolder($paths['home'])) {
+                    $left[] = "the folder [{$paths['home']}]";
                 }
             }
 
@@ -499,14 +511,58 @@ class ShopProvisioner
             throw new RuntimeException("There is already a customer on {$host}.");
         }
 
-        foreach (['home' => 'shop folder', 'public' => 'public folder'] as $key => $what) {
-            if (file_exists($paths[$key])) {
-                throw new RuntimeException(
-                    "The {$what} [{$paths[$key]}] already exists. Nothing was created — "
-                    .'move it aside first, or use a different short name.',
-                );
-            }
+        // The shop's private folder is the panel's alone. Nothing else on the
+        // account has any business creating it, so anything there is a reason
+        // to stop and look.
+        if (file_exists($paths['home'])) {
+            throw new RuntimeException(
+                "The shop folder [{$paths['home']}] already exists. Nothing was created — "
+                .'move it aside first, or use a different short name.',
+            );
         }
+
+        /*
+         * ⚠️ The public folder is different, and the first version got it wrong
+         * in a way that could only have been found on the real host.
+         *
+         * Creating a subdomain in cPanel creates its document root. So the
+         * folder the panel is about to write into is normally already there,
+         * made moments earlier by the very step that has to come first — and
+         * refusing on `file_exists` deadlocked the two: make the subdomain
+         * first and the panel refuses, make the customer first and cPanel finds
+         * the folder taken. Neither order worked, and the whole flow was
+         * unreachable on a real cPanel account.
+         *
+         * An EMPTY document root is not an install to protect; it is the
+         * cPanel half of the job already done. What must still be refused is a
+         * folder with something in it, because that is somebody's site.
+         */
+        if (file_exists($paths['public']) && ! $this->isAnEmptyDocumentRoot($paths['public'])) {
+            throw new RuntimeException(
+                "The public folder [{$paths['public']}] already has something in it, so it is not just a "
+                .'document root waiting to be filled. Nothing was created — move it aside first, or use a '
+                .'different short name.',
+            );
+        }
+    }
+
+    /**
+     * Is this a document root cPanel just made, rather than somebody's site?
+     *
+     * cPanel leaves a new one empty but for `cgi-bin`, and Let's Encrypt puts
+     * its challenges in `.well-known`. Neither is content and neither is worth
+     * refusing over. Anything else — an index.html, an old install, a stray
+     * upload — is somebody's, and gets the refusal.
+     */
+    private function isAnEmptyDocumentRoot(string $path): bool
+    {
+        if (! is_dir($path)) {
+            return false;
+        }
+
+        $entries = array_diff((array) scandir($path), ['.', '..', 'cgi-bin', '.well-known']);
+
+        return $entries === [];
     }
 
     /**
@@ -579,10 +635,16 @@ class ShopProvisioner
         $left = [];
 
         if ($made['folder']) {
-            foreach ([$paths['public'], $paths['home']] as $path) {
-                if (! $this->deleteFolder($path)) {
-                    $left[] = "the folder [{$path}]";
-                }
+            // The public one first, and only its contents when cPanel made the
+            // folder itself — removing a subdomain's document root leaves the
+            // domain pointing at nothing, which is a worse mess than the
+            // half-made shop this is cleaning up.
+            if (! $this->deleteFolder($paths['public'], keepTheFolderItself: ! $made['document_root'])) {
+                $left[] = "the folder [{$paths['public']}]";
+            }
+
+            if (! $this->deleteFolder($paths['home'])) {
+                $left[] = "the folder [{$paths['home']}]";
             }
         }
 
@@ -593,7 +655,7 @@ class ShopProvisioner
         return $left;
     }
 
-    private function deleteFolder(string $path): bool
+    private function deleteFolder(string $path, bool $keepTheFolderItself = false): bool
     {
         if (! is_dir($path)) {
             return true;
@@ -640,7 +702,7 @@ class ShopProvisioner
             $entry->isDir() && ! $entry->isLink() ? @rmdir($entry->getPathname()) : @unlink($entry->getPathname());
         }
 
-        return @rmdir($path);
+        return $keepTheFolderItself ? true : @rmdir($path);
     }
 
     /** @return array{home: string, public: string} */
