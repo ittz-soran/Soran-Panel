@@ -236,6 +236,41 @@ class PanelCheckTest extends TestCase
             'the root denial cascades into public/, so it has to be granted back',
         );
     }
+    // ---- The borrowed stylesheet -----------------------------------------
+
+    /**
+     * A fresh clone has no `public/build`, and that is not a fault.
+     *
+     * Section 10: it is the shop system's compiled output, copied in at DEPLOY
+     * time, and .gitignore keeps it out of the repository. CI therefore never
+     * has it — which is how five checks came to fail there on a machine that
+     * was never going to.
+     */
+    public function test_missing_assets_are_only_a_fault_on_a_server(): void
+    {
+        $manifest = public_path('build/manifest.json');
+        $moved = null;
+
+        if (is_file($manifest)) {
+            $moved = $manifest.'.moved-by-test';
+            rename(public_path('build'), public_path('build').'.moved-by-test');
+        }
+
+        try {
+            config(['app.env' => 'local']);
+            $this->artisan('panel:check')->assertSuccessful();
+
+            config(['app.env' => 'production', 'app.debug' => false, 'app.url' => 'https://panel.soranstore.com']);
+            $this->artisan('panel:check')
+                ->expectsOutputToContain('would serve unstyled')
+                ->assertFailed();
+        } finally {
+            if ($moved !== null) {
+                rename(public_path('build').'.moved-by-test', public_path('build'));
+            }
+        }
+    }
+
     // ---- The template itself ----------------------------------------------
 
     /**

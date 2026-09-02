@@ -237,11 +237,31 @@ class PanelCheck extends Command
     private function theLook(): void
     {
         $this->check('The borrowed stylesheet', function () {
-            if (! is_file(public_path('build/manifest.json'))) {
-                throw new \RuntimeException('public/build is not there');
+            if (is_file(public_path('build/manifest.json'))) {
+                return ['ok', 'public/build is in place'];
             }
 
-            return ['ok', 'public/build is in place'];
+            /*
+             * Missing assets are a fault on a server and ordinary anywhere else.
+             *
+             * Section 10: public/build is the shop system's compiled output,
+             * copied in at DEPLOY time, and .gitignore keeps it out of the
+             * repository — so it is legitimately absent on a fresh clone and in
+             * CI. On a server it means every screen serves unstyled, which is
+             * the panel looking broken rather than undeployed.
+             *
+             * This is the same split as APP_DEBUG above, and it was CI that
+             * asked for it: five checks failed there on a machine that was
+             * never going to have the assets.
+             */
+            if (config('app.env') === 'production') {
+                throw new \RuntimeException(
+                    'public/build is not there, so every screen would serve unstyled',
+                );
+            }
+
+            return ['warn', 'public/build is not there — expected on a fresh clone, and copied in at '
+                .'deploy time. On a server this is a failure.'];
         }, 'Copy the shop system’s compiled public/build into this panel’s public/. Section 10: the panel has '
            .'no stylesheet of its own and no npm build.');
     }
