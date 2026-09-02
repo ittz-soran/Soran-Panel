@@ -1,0 +1,36 @@
+# Nothing in this folder belongs on the web.
+#
+# The same net the shop system carries, and the panel needs it more.
+#
+# PANEL_DOC Section 4: "Document roots cannot leave public_html. Tested: cPanel
+# silently created its own folder inside public_html and ignored the path typed
+# in." So the ordinary outcome on this hosting is that a project ends up
+# uploaded inside public_html, where everything beside `public/` is served too —
+# including .env, which a browser will show as a page of plain text to anybody
+# who guesses the URL.
+#
+# Section 4 also records finding exactly that on a real customer's install:
+# Halabja-phone was serving its .env and its laravel.log to anyone.
+#
+# What is in the PANEL's .env is worse than one shop's:
+#
+#   - the database holding every customer, every licence and every payment
+#   - PANEL_ADMIN_PASSWORD, and there is no second factor until somebody sets
+#     one up
+#   - PANEL_MAKER_* — an account that may CREATE and DROP DATABASE, which is
+#     every shop on the account
+#
+# The real fix is `php artisan panel:public`, which puts the six files the web
+# is allowed to see in their own folder and leaves this one outside it. This is
+# the net for before that has been done, or if it is ever undone.
+#
+# Where the document root already points elsewhere, this file simply sits
+# outside it and is never read. It costs nothing to leave in place.
+
+<IfModule mod_authz_core.c>
+    Require all denied
+</IfModule>
+<IfModule !mod_authz_core.c>
+    Order allow,deny
+    Deny from all
+</IfModule>

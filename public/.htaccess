@@ -1,3 +1,19 @@
+# The one folder that is meant to be public.
+#
+# The .htaccess above this denies everything, for the case Section 4 says is
+# normal on this hosting: the whole panel uploaded inside public_html, where
+# .env would otherwise be a URL away. That denial cascades into subfolders, so
+# this grants the exception back. Where the document root already points here,
+# it is the default anyway.
+
+<IfModule mod_authz_core.c>
+    Require all granted
+</IfModule>
+<IfModule !mod_authz_core.c>
+    Order allow,deny
+    Allow from all
+</IfModule>
+
 <IfModule mod_rewrite.c>
     <IfModule mod_negotiation.c>
         Options -MultiViews -Indexes
