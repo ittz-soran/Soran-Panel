@@ -3,9 +3,12 @@
 namespace App\Console\Commands;
 
 use App\Contracts\DatabaseMaker;
+use App\Models\Customer;
+use App\Models\HealthCheck;
 use App\Models\User;
 use App\Services\CpanelDatabaseMaker;
 use Illuminate\Console\Command;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Throwable;
 
@@ -51,6 +54,8 @@ class PanelCheck extends Command
         $this->makingDatabases();
         $this->theSellersKey();
         $this->theLook();
+        $this->notServingItsOwnSecrets();
+        $this->readyToBeUsedInAnger();
 
         $this->newLine();
 
@@ -69,7 +74,8 @@ class PanelCheck extends Command
         // red for both teaches you to ignore it.
         $this->components->info($this->worthKnowing === 0
             ? 'Everything this panel needs is here.'
-            : 'Everything this panel needs is here. '.$this->worthKnowing.' thing worth reading above.');
+            : sprintf('Everything this panel needs is here. %d %s worth reading above.',
+                $this->worthKnowing, $this->worthKnowing === 1 ? 'thing' : 'things'));
 
         return self::SUCCESS;
     }
@@ -238,6 +244,126 @@ class PanelCheck extends Command
             return ['ok', 'public/build is in place'];
         }, 'Copy the shop system’s compiled public/build into this panel’s public/. Section 10: the panel has '
            .'no stylesheet of its own and no npm build.');
+    }
+
+    /**
+     * Whether the panel's own `.env` could be fetched with a browser.
+     *
+     * Section 4 records finding exactly this on a real customer's install:
+     * Halabja-phone was serving its `.env` and `laravel.log` to anyone. The
+     * panel's `.env` is worse than one shop's — it holds the database with
+     * every customer, licence and payment, the admin password, and the account
+     * that may create and drop databases.
+     *
+     * Two things make that safe, and this asks for both: the deny-all
+     * `.htaccess` beside the code, and the code not being under a public folder
+     * in the first place.
+     */
+    private function notServingItsOwnSecrets(): void
+    {
+        $this->check('Its own .env is not on the web', function () {
+            if (! is_file(base_path('.htaccess'))) {
+                throw new \RuntimeException(
+                    'there is no deny-all .htaccess beside the code — if this folder is inside public_html, '
+                    .'.env is a URL away',
+                );
+            }
+
+            if (! str_contains((string) file_get_contents(base_path('.htaccess')), 'denied')) {
+                throw new \RuntimeException('the .htaccess beside the code does not deny anything');
+            }
+
+            // Being outside a public folder is the real protection; the
+            // .htaccess is only the net for when it is not.
+            $base = base_path();
+            $inPublic = (bool) preg_match('#/public_html(/|$)#', $base);
+
+            return [$inPublic ? 'warn' : 'ok', $inPublic
+                ? "the panel's code is inside public_html [{$base}] — the .htaccess is denying it, but "
+                    .'`panel:public` and a folder outside is the arrangement that does not depend on Apache'
+                : 'the code is outside public_html, and the .htaccess is there as well'];
+        }, 'Move the panel outside public_html and run `php artisan panel:public <folder inside public_html>`.');
+    }
+
+    /**
+     * The handful of things that are fine on a laptop and wrong on a server.
+     *
+     * Kept apart from the settings above because these are about the machine
+     * rather than about what the panel can reach — and because every one of
+     * them is the right answer locally and the wrong one in production.
+     */
+    private function readyToBeUsedInAnger(): void
+    {
+        $isServer = config('app.env') === 'production';
+
+        $this->check($isServer ? 'Ready to be used in anger' : 'Not set up as a server (which is fine here)', function () use ($isServer) {
+            $wrong = [];
+
+            // Only ever wrong. An unwritable storage folder breaks a laptop
+            // exactly as thoroughly as it breaks a server.
+            if ((string) config('app.key') === '') {
+                $wrong[] = 'APP_KEY is empty, so nothing encrypted can be read back';
+            }
+
+            foreach (['storage', 'bootstrap/cache'] as $writable) {
+                if (! is_writable(base_path($writable))) {
+                    $wrong[] = "[{$writable}] cannot be written to";
+                }
+            }
+
+            if ($wrong !== []) {
+                throw new \RuntimeException(implode('; ', $wrong));
+            }
+
+            /*
+             * And the ones that depend on where this is.
+             *
+             * APP_DEBUG on is the right answer on a laptop and a hole on a
+             * server, so which of those this is decides whether these are
+             * failures or just worth saying. A check that goes red on a
+             * developer's machine for being a developer's machine is a check
+             * they stop reading.
+             */
+            $forAServer = [];
+
+            if (config('app.debug')) {
+                $forAServer[] = 'APP_DEBUG is on, so a crash shows the .env on screen';
+            }
+
+            if (! str_starts_with((string) config('app.url'), 'https://')) {
+                $forAServer[] = 'APP_URL is not https — sessions would travel in the open';
+            }
+
+            if (! $isServer) {
+                return ['warn', 'APP_ENV is ['.config('app.env').'], so this is not being judged as a server. '
+                    .'Before deploying: '.(
+                        $forAServer === [] ? 'set APP_ENV=production' : implode('; ', $forAServer)
+                    )];
+            }
+
+            if ($forAServer !== []) {
+                throw new \RuntimeException(implode('; ', $forAServer));
+            }
+
+            // The hourly check only runs if cron is calling schedule:run.
+            $lastCheck = HealthCheck::max('checked_at');
+
+            if (Customer::live()->exists()) {
+                if ($lastCheck === null) {
+                    return ['warn', 'no shop has ever been checked — is cron calling `schedule:run`?'];
+                }
+
+                $ago = Carbon::parse($lastCheck);
+
+                if ($ago->lt(now()->subHours(3))) {
+                    return ['warn', 'the last health check was '.$ago->diffForHumans()
+                        .' — the schedule asks hourly, so cron may not be running'];
+                }
+            }
+
+            return ['ok', 'debug off, key set, https, folders writable'];
+        }, 'Set APP_DEBUG=false, APP_ENV=production and an https APP_URL; run `php artisan key:generate` if '
+           .'the key is empty; and add the cron entry that calls `schedule:run` every minute.');
     }
 
     /**

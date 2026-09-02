@@ -160,4 +160,79 @@ class PanelCheckTest extends TestCase
             ->expectsOutputToContain('0 with an authenticator')
             ->assertSuccessful();
     }
+    // ---- The things that are only wrong on a server ----------------------
+
+    /**
+     * A laptop is not a misconfigured server.
+     *
+     * APP_DEBUG on is the right answer locally and a hole in production, so a
+     * check that goes red for it on a developer's machine is one they stop
+     * reading.
+     */
+    public function test_a_development_machine_is_not_judged_as_a_server(): void
+    {
+        config(['app.env' => 'local', 'app.debug' => true, 'app.url' => 'http://localhost']);
+
+        $this->artisan('panel:check')
+            ->expectsOutputToContain('not being judged as a server')
+            ->assertSuccessful();
+    }
+
+    public function test_a_server_with_debug_on_fails(): void
+    {
+        config(['app.env' => 'production', 'app.debug' => true, 'app.url' => 'https://panel.soranstore.com']);
+
+        $this->artisan('panel:check')
+            ->expectsOutputToContain('APP_DEBUG is on')
+            ->assertFailed();
+    }
+
+    public function test_a_server_not_on_https_fails(): void
+    {
+        config(['app.env' => 'production', 'app.debug' => false, 'app.url' => 'http://panel.soranstore.com']);
+
+        $this->artisan('panel:check')
+            ->expectsOutputToContain('not https')
+            ->assertFailed();
+    }
+
+    /** An empty APP_KEY breaks a laptop exactly as thoroughly as a server. */
+    public function test_an_empty_app_key_fails_anywhere(): void
+    {
+        config(['app.env' => 'local', 'app.key' => '']);
+
+        $this->artisan('panel:check')
+            ->expectsOutputToContain('APP_KEY is empty')
+            ->assertFailed();
+    }
+
+    // ---- Its own secrets --------------------------------------------------
+
+    /**
+     * Section 4 records finding a real customer's install serving its .env to
+     * anyone. The panel's is worse: the customer list, the admin password, and
+     * an account that may create and drop databases.
+     */
+    public function test_it_checks_the_panel_is_not_serving_its_own_env(): void
+    {
+        $this->artisan('panel:check')
+            ->expectsOutputToContain('Its own .env is not on the web')
+            ->assertSuccessful();
+    }
+
+    public function test_the_deny_all_htaccess_is_really_there(): void
+    {
+        $this->assertFileExists(base_path('.htaccess'), 'the net for a panel uploaded inside public_html is gone');
+        $this->assertStringContainsString('denied', file_get_contents(base_path('.htaccess')));
+    }
+
+    /** And public/ grants itself back, or the panel serves nothing at all. */
+    public function test_the_public_folder_grants_itself_back(): void
+    {
+        $this->assertStringContainsString(
+            'Require all granted',
+            file_get_contents(public_path('.htaccess')),
+            'the root denial cascades into public/, so it has to be granted back',
+        );
+    }
 }
