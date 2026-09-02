@@ -4,6 +4,9 @@
 @section('subheading', 'Every shop sold, and what it is doing.')
 
 @section('actions')
+    <a href="{{ route('customers.take-on') }}" class="btn btn-sm btn-outline-secondary">
+        <i class="bi bi-inbox me-1"></i>Take on an existing shop
+    </a>
     <a href="{{ route('customers.create') }}" class="btn btn-sm btn-primary">
         <i class="bi bi-plus-lg me-1"></i>New customer
     </a>

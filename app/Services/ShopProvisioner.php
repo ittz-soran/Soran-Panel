@@ -3,9 +3,13 @@
 namespace App\Services;
 
 use App\Contracts\DatabaseMaker;
+use App\Contracts\ShopWriter;
 use App\Models\Action;
 use App\Models\Customer;
+use App\Support\ReadOnlyConnection;
 use App\Support\ShopEnvironment;
+use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use RuntimeException;
 use Symfony\Component\Process\Process;
@@ -49,6 +53,7 @@ class ShopProvisioner
     public function __construct(
         private readonly DatabaseMaker $databases,
         private readonly LicenceDelivery $delivery,
+        private readonly ShopWriter $writer,
     ) {}
 
     /**
@@ -142,6 +147,345 @@ class ShopProvisioner
             'admin_password' => $admin['password'],
             'warnings' => $warnings,
         ];
+    }
+
+    /**
+     * Take on a shop whose database already exists — build order step 10.
+     *
+     * The opposite of create(), and the dangerous one. Halabja-phone's install
+     * folder was deleted and its database was deliberately KEPT — PANEL_DOC
+     * Section 13: "its database must be kept", "because that is what a rebuilt
+     * install restores from". So the panel has to be able to build a shop
+     * AROUND data that is already there, rather than making data of its own.
+     *
+     * Three things are different from create(), and each is a way to destroy a
+     * real customer's trading history:
+     *
+     *   - **No database is created.** It exists, it is theirs, and the panel
+     *     verifies it looks like a shop before touching anything.
+     *   - **`db:seed` is never run.** Seeding a live database adds a second
+     *     administrator, rewrites the settings and resets the document
+     *     counters. `migrate` alone, to bring an old schema up to the shared
+     *     codebase.
+     *   - **The rollback never drops the database.** On any failure it removes
+     *     the folder this run made and stops. A rollback that took the database
+     *     with it would destroy exactly what this flow exists to preserve.
+     *
+     * And a backup is taken first, through the shop's own `backup:run`, because
+     * Section 7 requires one before anything irreversible and a migration on
+     * somebody's real records is the definition of that.
+     *
+     * @param  array{
+     *     name: string, short_name: string, host: string, contact_name: ?string,
+     *     phone: ?string, email: ?string, monthly_fee: int, storage_limit_mb: ?int,
+     *     database: string, database_user: string, database_password: string,
+     *     app_key: ?string, backup: bool, trial: bool, licence: ?string, notes: ?string
+     * }  $wanted
+     * @return array{customer: Customer, found: array<string, int>, migrations_run: int, warnings: list<string>}
+     */
+    public function takeOn(array $wanted): array
+    {
+        $short = Str::lower(Str::of($wanted['short_name'])->replaceMatches('/[^A-Za-z0-9_]/', '')->value());
+
+        if ($short === '') {
+            throw new RuntimeException('That short name has no letters or numbers in it.');
+        }
+
+        $paths = $this->paths($short);
+        $warnings = [];
+        $madeFolder = false;
+
+        try {
+            $this->refuseIfAnythingIsInTheWay($paths, $wanted['host']);
+
+            // Before anything is written: is this really a shop's database, and
+            // does it have anything in it? An empty one is a NEW customer, and
+            // sending it down this path would leave them with no administrator
+            // and no settings, because this flow never seeds.
+            $found = $this->lookAtTheirDatabase($wanted);
+
+            if ($found['authenticators'] > 0 && blank($wanted['app_key'] ?? null)) {
+                throw new RuntimeException(sprintf(
+                    '%d of their staff have an authenticator, and its secret is encrypted with the shop’s '
+                    .'APP_KEY. `shop:provision` writes a fresh key, which would leave those secrets unreadable '
+                    .'and break their sign-in. Give the ORIGINAL APP_KEY from the old install’s .env — it is in '
+                    .'your backup — or clear two_factor_secret and two_factor_recovery_codes on those users '
+                    .'yourself first, so they enrol again. Nothing has been changed.',
+                    $found['authenticators'],
+                ));
+            }
+
+            $this->provision(
+                $short, $paths, $wanted,
+                $wanted['database'], $wanted['database_user'], $wanted['database_password'],
+            );
+            $madeFolder = true;
+
+            // Their own key back, so what it encrypted stays readable.
+            // shop:provision has no option for this and should not: a new shop
+            // must always get a fresh key, and this is the one case that is not
+            // a new shop.
+            if (filled($wanted['app_key'] ?? null)) {
+                $this->writer->putEnv(
+                    new Customer(['shop_home' => $paths['home']]),
+                    ['APP_KEY' => $wanted['app_key']],
+                );
+            }
+
+            $artisan = rtrim($paths['home'], '/').'/artisan';
+
+            if ($wanted['backup']) {
+                $warnings = [...$warnings, ...$this->backUpFirst($artisan)];
+            } else {
+                $warnings[] = 'No backup was taken before migrating, because you said you already had one.';
+            }
+
+            $before = $this->migrationsAlreadyRun($artisan);
+            $this->run([PHP_BINARY, $artisan, 'migrate', '--force'], 'bringing their database up to date');
+            $after = $this->migrationsAlreadyRun($artisan);
+
+            $customer = Customer::create([
+                'name' => $wanted['name'],
+                'contact_name' => $wanted['contact_name'] ?? null,
+                'phone' => $wanted['phone'] ?? null,
+                'email' => $wanted['email'] ?? null,
+                'host' => $wanted['host'],
+                'shop_home' => $paths['home'],
+                'public_path' => $paths['public'],
+                'database_name' => $wanted['database'],
+                'database_user' => $wanted['database_user'],
+                'status' => $wanted['trial'] ? Customer::TRIAL : Customer::ACTIVE,
+                'monthly_fee' => $wanted['monthly_fee'],
+                'storage_limit_mb' => $wanted['storage_limit_mb'] ?? null,
+                'language' => 'ckb',
+
+                // Not today. They were trading long before the panel existed,
+                // and "started" is what the Subscriptions screen counts unpaid
+                // months from — dating it today would forgive everything owed.
+                'started_on' => null,
+                'notes' => $wanted['notes'] ?? null,
+            ]);
+        } catch (Throwable $e) {
+            /*
+             * The folder only. Never the database.
+             *
+             * create() takes its database back on failure because it made it.
+             * This one did not: it belongs to a customer with years of trading
+             * in it, and a rollback that dropped it would destroy the exact
+             * thing this flow exists to preserve.
+             */
+            $left = [];
+
+            if ($madeFolder) {
+                foreach ([$paths['public'], $paths['home']] as $path) {
+                    if (! $this->deleteFolder($path)) {
+                        $left[] = "the folder [{$path}]";
+                    }
+                }
+            }
+
+            throw new RuntimeException(
+                $e->getMessage()
+                .' Their database has not been touched.'
+                .($left === [] ? '' : ' Left behind: '.implode(', ', $left).'.'),
+                previous: $e,
+            );
+        }
+
+        Action::record('customer.taken_on', $customer, [
+            'host' => $wanted['host'],
+            'database' => $wanted['database'],
+            'found' => $found,
+            'migrations_run' => max(0, $after - $before),
+            'backed_up' => $wanted['backup'],
+        ]);
+
+        if (! $wanted['trial'] && filled($wanted['licence'] ?? null)) {
+            $result = $this->delivery->deliver($customer, $wanted['licence']);
+
+            if (! $result->confirmed) {
+                $warnings[] = 'The shop is taken on, and the licence did not go on: '.$result->problem;
+            }
+        }
+
+        return [
+            'customer' => $customer,
+            'found' => $found,
+            'migrations_run' => max(0, $after - $before),
+            'warnings' => $warnings,
+        ];
+    }
+
+    /**
+     * Is this really a shop's database, with a shop's data in it?
+     *
+     * Read-only, through the connection that cannot write — the same guard the
+     * hourly check uses. Nothing here may change a byte of it.
+     *
+     * @param  array<string, mixed>  $wanted
+     * @return array<string, int>
+     */
+    private function lookAtTheirDatabase(array $wanted): array
+    {
+        $connection = 'takeon:'.bin2hex(random_bytes(4));
+
+        Config::set("database.connections.{$connection}", [
+            'driver' => 'mysql',
+            'host' => config('panel.maker_probe.host', config('panel.database_maker.host', '127.0.0.1')),
+            'port' => config('panel.maker_probe.port', '3306'),
+            'database' => $wanted['database'],
+            'username' => $wanted['database_user'],
+            'password' => $wanted['database_password'],
+            'charset' => 'utf8mb4',
+            'collation' => 'utf8mb4_unicode_ci',
+            'prefix' => '',
+        ]);
+
+        try {
+            $live = DB::connection($connection);
+
+            $shop = new ReadOnlyConnection(
+                $live->getPdo(), $wanted['database'], $live->getTablePrefix(), $live->getConfig(),
+            );
+
+            $found = [];
+
+            // The tables a shop system database always has. A database missing
+            // them is something else entirely, and pointing a shop at it would
+            // be pointing a shop at somebody's other application.
+            foreach (['users', 'products', 'sales', 'settings', 'migrations'] as $table) {
+                try {
+                    $found[$table] = (int) $shop->selectOne("select count(*) as n from `{$table}`")->n;
+                } catch (Throwable) {
+                    throw new RuntimeException(
+                        "[{$wanted['database']}] has no `{$table}` table, so it is not a shop system database. "
+                        .'Nothing was changed.',
+                    );
+                }
+            }
+
+            /*
+             * How many people would be locked out by a new APP_KEY.
+             *
+             * The shop system encrypts two_factor_secret and
+             * two_factor_recovery_codes with APP_KEY. `shop:provision` writes a
+             * FRESH one, and Halabja-phone's original died with the install
+             * folder Section 4 had deleted — so every staff authenticator would
+             * become ciphertext nothing can read, and the cast would throw on
+             * sign-in rather than politely asking them to enrol again.
+             */
+            try {
+                $found['authenticators'] = (int) $shop->selectOne(
+                    'select count(*) as n from `users` where `two_factor_secret` is not null',
+                )->n;
+            } catch (Throwable) {
+                // An older schema without the column. Nothing to lose, then.
+                $found['authenticators'] = 0;
+            }
+
+            if ($found['users'] === 0) {
+                throw new RuntimeException(
+                    "[{$wanted['database']}] has no users in it, so nobody could sign in to the shop this "
+                    .'would build. If this is a new customer, use New customer instead — that one seeds an '
+                    .'administrator, and this one deliberately never does.',
+                );
+            }
+
+            return $found;
+        } catch (\PDOException $e) {
+            /*
+             * ⚠️ Before the RuntimeException arm, not after it. PHP's
+             * PDOException EXTENDS RuntimeException, so a `catch (RuntimeException)`
+             * placed first catches a wrong password too and rethrows the raw
+             * driver text — "SQLSTATE[HY000] [1045] Access denied for user
+             * 'panelmaker'@'localhost'" — which names the PANEL's database user
+             * in a message about the CUSTOMER's credentials, and reads as the
+             * panel being broken rather than the details being wrong.
+             */
+            throw new RuntimeException(
+                "Could not read [{$wanted['database']}] with those credentials: ".$e->getMessage(),
+            );
+        } catch (RuntimeException $e) {
+            // Everything above that refused on purpose. Its wording is the
+            // answer; wrapping it again would bury it.
+            throw $e;
+        } catch (Throwable $e) {
+            throw new RuntimeException(
+                "Could not read [{$wanted['database']}] with those credentials: ".$e->getMessage(),
+            );
+        } finally {
+            DB::purge($connection);
+            Config::set("database.connections.{$connection}", null);
+        }
+    }
+
+    /**
+     * Their own backup, through their own tooling — Section 7.
+     *
+     * Not the panel's idea of a backup: the shop system already knows how to
+     * dump itself and where its copies go, and a restore later will expect that
+     * shape.
+     *
+     * ⚠️ **Deliberately not gated on `backup:check`.** That was the first
+     * attempt, and driving it against a real shop showed why it cannot be:
+     * `backup:check` diagnoses the ongoing REGIME — is an off-machine folder
+     * set, have backups run before — and both are necessarily false for a
+     * folder the panel built ninety seconds ago, however perfectly dumpable
+     * their database is. So it refused every single take-on, which leaves the
+     * operator one way forward: untick the box. A rule that can only be
+     * satisfied by skipping the backup teaches people to skip backups, in the
+     * one flow that most needs one.
+     *
+     * What matters here is narrower and testable: **a dump, now, that landed.**
+     * That is `backup:run` succeeding. If their database cannot be dumped at
+     * all — no mysqldump, an unwritable folder — `backup:run` is what fails,
+     * and its own output says which.
+     *
+     * The regime is still worth knowing about, so it is asked afterwards and
+     * comes back as a warning. Something for the operator to fix, not a reason
+     * to refuse a migration that has already been backed up.
+     *
+     * @return list<string> anything worth saying afterwards
+     */
+    private function backUpFirst(string $artisan): array
+    {
+        $backup = $this->run(
+            [PHP_BINARY, $artisan, 'backup:run'],
+            'backing their database up before touching it',
+        );
+
+        $check = new Process([PHP_BINARY, $artisan, 'backup:check'], env: ShopEnvironment::withoutThePanel());
+        $check->setTimeout(self::TIMEOUT);
+        $check->run();
+
+        $warnings = [];
+
+        if (! $check->isSuccessful()) {
+            $warnings[] = 'Their database was backed up, but their backups are not set up to keep running — '
+                .'no off-machine copy, most likely, because this folder is new. Run `backup:check` on the shop '
+                .'and set it up before they rely on it.';
+        }
+
+        /*
+         * Where it went, said out loud. If the migration goes wrong an hour
+         * from now, the first question is "where is the backup" and the answer
+         * should not be somewhere in a log nobody kept.
+         */
+        if (preg_match('#^\s*(\S+\.(?:sql|zip|gz|sql\.gz))\s#mi', $backup, $where) === 1) {
+            $warnings[] = 'Their backup is at '.$where[1].'.';
+        }
+
+        return $warnings;
+    }
+
+    /** How many migrations the shop has run, so the difference can be reported. */
+    private function migrationsAlreadyRun(string $artisan): int
+    {
+        $process = new Process([PHP_BINARY, $artisan, 'migrate:status'], env: ShopEnvironment::withoutThePanel());
+        $process->setTimeout(self::TIMEOUT);
+        $process->run();
+
+        return preg_match_all('/\bRan\s*$/m', $process->getOutput());
     }
 
     /**
