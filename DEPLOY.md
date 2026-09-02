@@ -15,6 +15,26 @@ creating a customer.
 
 ---
 
+## Step 0. Your account's real name
+
+Every path below is written as `/home/soransto/…`. That is a guess at your cPanel
+username, and if it is wrong every path is wrong. Open cPanel → **Terminal** and
+run:
+
+```bash
+echo $HOME
+```
+
+Whatever it prints is the folder everything below lives in. If it is not
+`/home/soransto`, substitute it everywhere — including in the `.env` values,
+which are absolute paths and will not fall back to anything sensible.
+
+If there is no **Terminal** in cPanel, stop here and tell me: without shell
+access the whole approach changes, because `composer`, `artisan` and
+`shop:provision` all need one.
+
+---
+
 ## What ends up where
 
 Section 4 measured that **a document root cannot leave `public_html`** — cPanel
@@ -49,7 +69,7 @@ account that may create and drop databases.
 
 ```bash
 cd ~
-git clone <your repo> smart-store
+git clone https://github.com/ittz-soran/systemmanagment.git smart-store
 cd smart-store
 composer install --no-dev --optimize-autoloader
 npm install && npm run build          # builds public/build — needed by the panel too
@@ -66,7 +86,7 @@ machine and upload it.
 
 ```bash
 cd ~
-git clone <panel repo> panel
+git clone https://github.com/ittz-soran/Soran-Panel.git panel
 cd panel
 composer install --no-dev --optimize-autoloader
 cp .env.example .env
@@ -194,7 +214,49 @@ account, and cPanel sometimes wants `/usr/local/bin/ea-php83`.
 
 ---
 
-## 8. Speed, last
+## 8. Your own shop, through the panel
+
+Build order step 10, and the last one. **Customers → New customer**, filled in
+for your own shop.
+
+This is also what proves the **cPanel UAPI** half of database creation. It is
+the one piece of the panel that has never run against a real cPanel account: it
+is written from cPanel's documented API and Section 4's measurement, and its
+tests drive a fake. If a call name is wrong you will see cPanel's own error text
+on the screen, and **nothing will be left half-made** — the rollback is tested,
+and it takes back the database, the database user and both folders.
+
+Fill it in like this:
+
+| Field | What to put |
+|---|---|
+| Shop name | Your shop, as it should read on its own screen |
+| Short name | Lower-case letters and numbers. Becomes the folder, `<short>_shop` and `<short>_user`, and **cannot be changed later** |
+| Domain | The subdomain — create it in cPanel **first**, pointing at `/home/soransto/public_html/<short>` |
+| How they start | **On a free trial.** Nothing signed, nothing to paste, and it proves the whole path works before a licence is involved |
+
+Then, once it is trading:
+
+1. Sign in to the shop itself and check it works — it is a real install.
+2. On your own machine, run `licence:issue --host=<your subdomain>`.
+3. In the panel, **Renew**, and paste it. The panel verifies, writes, clears the
+   shop's cache, and asks the shop what it now thinks. `valid` on screen means
+   the whole licence path works end to end on the real host.
+
+> **Create the subdomain first, then the customer.** cPanel creates the
+> document root when you create the subdomain, and the panel writes into it.
+>
+> Writing this checklist is what found that the panel could not do that: it
+> refused any public folder that already existed, so making the subdomain first
+> deadlocked it, and making the customer first left cPanel to find the folder
+> taken. Neither order worked. An empty document root — or one holding nothing
+> but `cgi-bin` and `.well-known` — is now written into, and a folder with
+> anything else in it is still refused, because that is somebody's site. If the
+> panel does refuse, the message names the folder.
+
+---
+
+## 9. Speed, last
 
 ```bash
 php artisan config:cache
@@ -208,21 +270,6 @@ trap the panel clears for a shop after delivering a licence.
 
 ⚠️ If something breaks straight after this, `php artisan optimize:clear` puts it
 back.
-
----
-
-## Then, Soran's own shop
-
-Build order step 10: your own shop first, then Halabja-phone rebuilt through the
-panel. Halabja's database must be kept — Section 13 — so that one is a restore
-into a shop the panel provisions, not a fresh start.
-
-The first customer created on the server is also what proves the **cPanel UAPI**
-half of database creation. It is the one piece of the panel that has never run
-against real cPanel: it is written from cPanel's documented API and Section 4's
-measurement, and its tests drive a fake. If a call name is wrong you will see
-cPanel's own error text on the screen, and nothing will be left half-made — the
-rollback is tested.
 
 ---
 
