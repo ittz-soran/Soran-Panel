@@ -193,6 +193,13 @@ cd smart-store
 composer install --no-dev --optimize-autoloader
 ```
 
+**No `.env` here, and that is deliberate.** This folder is not an install — it
+is the library every shop reads and the commands the panel runs, and it has no
+shop and no database of its own. Each shop's `.env` lives in its own folder
+under `~/shops`. Giving this one a `.env` would mean a database created purely
+to make `shop:provision` runnable, and Section 13 records the database count as
+the real ceiling on how many customers fit here.
+
 ### The compiled assets
 
 `public/build` is not in the repository — it is built, not written — and **every
