@@ -343,18 +343,75 @@ sign in, the seller's public key, and its `.env` not being on the web.
 
 ## 6. Where the domain points
 
+This is two separate jobs in two different places, and doing only the first is
+the trap: cPanel sets up the **web server**, Cloudflare publishes the **name**.
+Neither one does the other's half.
+
+### 6a. cPanel — the web server
+
 ```bash
 php artisan panel:public /home/soransto/public_html/panel
 ```
 
-Then in cPanel → **Subdomains**, create `panel.soranstore.com` with its document
-root at `/home/soransto/public_html/panel`.
+Then in cPanel → **Domains** → *Create A New Domain*, make
+`panel.soranstore.com` with its document root at
+`/home/soransto/public_html/panel`.
 
-⚠️ cPanel will offer its own path. Let it create the subdomain, then check that
-the document root really is that folder — Section 4 records it silently using
-its own and ignoring what was typed.
+⚠️ Newer cPanel has no separate **Subdomains** page — a subdomain of a domain
+you already own is created here, and it is the same thing. Do not go looking
+for Subdomains and conclude something is missing.
 
-DNS is Cloudflare, proxied. **SSL/TLS must be Full (strict)** — Section 4 again.
+⚠️ cPanel will offer its own path. Let it create the domain, then check the
+Document Root column really says that folder — Section 4 records it silently
+using its own and ignoring what was typed.
+
+### 6b. Cloudflare — the name
+
+**The nameservers for `soranstore.com` are Cloudflare's, so cPanel's DNS zone
+is not authoritative and nothing it writes is ever published.** Adding the
+domain in cPanel gives you a working web server that no one can reach:
+
+```
+This site can’t be reached
+panel.soranstore.com’s server IP address could not be found.
+ERR_NAME_NOT_RESOLVED
+```
+
+In the Cloudflare dashboard → **DNS** → *Add record*:
+
+| Field | Value |
+|---|---|
+| Type | `CNAME` |
+| Name | `panel` |
+| Target | `soranstore.com` |
+| Proxy status | **DNS only** (grey cloud) — for now |
+
+A CNAME to the main domain rather than an A record to an IP address, so it
+follows the main domain wherever it moves and there is no address to copy
+wrongly.
+
+⚠️ **Grey cloud first, not orange.** cPanel's AutoSSL proves it owns the name
+by answering a request on it over plain HTTP, and it can only do that if the
+request reaches the server. Turn the proxy on before the certificate exists and
+the next step has nothing to validate against.
+
+**Check** — from any machine, the name now answers:
+
+```bash
+getent hosts panel.soranstore.com     # or: nslookup panel.soranstore.com
+```
+
+### 6c. The certificate, then the proxy
+
+In cPanel → **SSL/TLS Status**, tick `panel.soranstore.com` and *Run AutoSSL*.
+Wait for it to report a certificate.
+
+Only then, in Cloudflare: switch that record to **Proxied** (orange cloud), and
+under **SSL/TLS → Overview** set the mode to **Full (strict)** — Section 4.
+
+⚠️ Order matters. Full (strict) with no certificate on the origin is a
+Cloudflare **526** error, which looks like the panel is broken when the only
+thing missing is the certificate.
 
 **Check:** `https://panel.soranstore.com/login` shows the sign-in screen, and
 `https://panel.soranstore.com/.env` does **not** show a file. It should be a
