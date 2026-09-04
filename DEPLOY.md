@@ -265,7 +265,7 @@ cp -r ~/smart-store/public/build ~/panel/public/build
 
 ---
 
-## 3. Its database
+## 3. Its database, and everything else it must be told
 
 Make one in cPanel → **MySQL Databases**: a database, a user, and the user
 granted **ALL PRIVILEGES** on it. That account needs rights over this one
@@ -276,30 +276,29 @@ database only.
 question left: it is the real ceiling on how many customers fit on this account,
 and one shop uses one database.
 
-Then in `~/panel/.env`:
-
-```
-DB_DATABASE=soransto_panel
-DB_USERNAME=soransto_panel
-DB_PASSWORD=…
-```
+Then let the panel ask for the rest, rather than editing the file:
 
 ```bash
-php artisan migrate --force
+cd ~/panel
+php artisan panel:setup
 ```
 
----
+It asks for the database, its user and its password — and **tests them before
+going on**, so a wrong one is caught while you are still looking at the cPanel
+page it came from. Then the cPanel prefix (offered from the database name you
+just gave), your name, email and a password for signing in, and the address the
+panel will answer on. Nothing is written until every answer is in.
 
-## 4. A way in
-
-```
-PANEL_ADMIN_NAME=Soran
-PANEL_ADMIN_EMAIL=you@example.com
-PANEL_ADMIN_PASSWORD=…                # at least 12 characters
-```
+⚠️ **Do not type these into `.env` by hand.** The template ships a database name
+that is a guess and wrong on every account, so `Access denied` for a name you
+never chose reads as a broken panel rather than an unedited setting. And a
+generated password often contains a backslash — in a double-quoted `.env` value
+that is an escape sequence, and an invalid one makes dotenv reject the *whole
+file*, losing every setting at once rather than just that one.
 
 ```bash
-php artisan db:seed --force
+php artisan migrate --force      # the panel’s tables
+php artisan db:seed --force      # you, so you can sign in
 ```
 
 There is **no sign-up page and no forgotten-password email** — `MAIL_MAILER` is
@@ -313,29 +312,32 @@ in, and `panel:check` will keep saying so until you do.
 
 ## 5. The rest of the settings
 
-```
-APP_ENV=production
-APP_DEBUG=false
-APP_URL=https://panel.soranstore.com
+`panel:setup` and the template between them have set most of this. These are
+the paths, and they are only wrong if your account is not at
+`/home/soransto` — step 0 told you:
 
+```
 PANEL_SHOPS_HOME=/home/soransto/shops
 PANEL_SHOPS_PUBLIC=/home/soransto/public_html
 PANEL_SHARED_ARTISAN=/home/soransto/smart-store/artisan
-
-PANEL_DATABASE_MAKER=cpanel
-PANEL_UAPI=/usr/bin/uapi
-PANEL_CPANEL_PREFIX=soransto          # cPanel prefixes every database and user
 ```
 
-`PANEL_CPANEL_PREFIX` matters more than it looks. cPanel creates
-`soransto_bazaar_shop` when asked for `bazaar_shop`, and the panel has to record
-the name the shop will really connect to — get it wrong and the panel cannot
-read that shop again.
+`PANEL_CPANEL_PREFIX`, which `panel:setup` asked for, matters more than it
+looks. cPanel creates `soransto_bazaar_shop` when asked for `bazaar_shop`, and
+the panel has to record the name the shop will really connect to — get it wrong
+and the panel cannot read that shop again.
 
 ```bash
 mkdir -p ~/shops
 php artisan panel:check
 ```
+
+⚠️ **`panel:check` is meant to be red here**, and this is the point people
+undo working settings trying to fix it. Until the shop system is installed it
+will say the shared codebase is missing, and until the compiled assets are
+copied in it will say the stylesheet is. Both are steps 1 and 2, and both are
+below. What must already be green: the panel's own database, somebody who can
+sign in, the seller's public key, and its `.env` not being on the web.
 
 ---
 
