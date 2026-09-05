@@ -349,14 +349,23 @@ that unlikely rather than impossible.
 4. **Reading a shop** — the service from Section 8, with the hourly health check.
 5. **Customers, one customer, Overview** — the screens that only read. **Done 2026-09-01.** "Code version" became "schema" — see Section 9.
 6. **Renew** — paste, verify, deliver, confirm. *(Task #42)* **Done 2026-09-01.**
-7. **New customer** — UAPI database creation, provision, seed, issue. **Done 2026-09-01**, along with operators, storage limits and suspend/resume. Not `install:sql` — see Section 7. ⚠️ The cPanel UAPI half has not been run against a real cPanel account; the first customer created on the server is what proves it.
+7. **New customer** — UAPI database creation, provision, seed, issue. **Done 2026-09-01**, along with operators, storage limits and suspend/resume. Not `install:sql` — see Section 7. **The cPanel UAPI half was proved on the real account 2026-09-05**, by creating Soran's own shop through New customer: `Mysql::create_database`, `create_user` and `set_privileges_on_database` all answered, and the shop was provisioned, migrated and seeded from them.
 8. **Subscriptions and payments.** **Done 2026-09-01**, with Health and What I changed — the two Section 9 pages this list never gave a step of their own. Also `panel:check`, which says whether a machine is set up to run the panel at all.
 9. **Deploy** — `smart-store` and `panel` on the server, `panel.soranstore.com`. **Prepared 2026-09-02:** `DEPLOY.md` is the checklist, `panel:public` writes the panel's public folder, and `panel:check` says whether the machine is ready. The steps that need the real cPanel account are marked ⚠️ and are Soran's to run.
-10. **Soran's own shop, created through the panel on the server.** The screen for
+10. **Soran's own shop, created through the panel on the server. Done 2026-09-05.**
+    Made from nothing on the real account — database through cPanel UAPI, folder,
+    migrations, seed — which is what proved step 7's UAPI half. The screen for
     taking on a shop whose database already exists was built for Halabja-phone and
-    is finished and tested — but **Soran no longer works for them (2026-09-02)**, so
-    step 10 is now one thing: his own shop, from nothing, on the real account. That
-    is also what proves the cPanel UAPI half of step 7.
+    is finished and tested, but **Soran no longer works for them (2026-09-02)**, so
+    that half was not needed here.
+
+    ⚠️ **The shop answers at `soranstore.com/<short>/` but not on its own
+    subdomain**, exactly as the panel does. Both domains are recorded correctly in
+    cPanel with the right document roots, and both 404 from LiteSpeed even for a
+    static file — so the vhost configuration is not being rebuilt when a domain is
+    added. That is the hosting account's problem, not the panel's: the files, PHP,
+    database and provisioning are all confirmed working through the other path.
+    With the host, 2026-09-05.
 
 ---
 
