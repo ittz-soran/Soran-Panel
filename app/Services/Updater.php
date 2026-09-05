@@ -136,6 +136,23 @@ class Updater
         }
 
         /*
+         * The panel's own tables, when the panel is what moved.
+         *
+         * A pull that brings a migration and does not run it is a panel that
+         * breaks on a missing column, and the screen that would fix it is the
+         * one that just broke. Its own database only — a customer's is never
+         * migrated by a button here.
+         */
+        if ($which === 'panel') {
+            try {
+                $said[] = trim($checkout->migrate());
+            } catch (RuntimeException $e) {
+                $warnings[] = 'The code is updated, but its migrations did not run — the panel may not work '
+                    ."until `php artisan migrate --force` is run in [{$checkout->path}]. ".$e->getMessage();
+            }
+        }
+
+        /*
          * And every shop's, when the shared codebase moved.
          *
          * Section 3 gives each shop its own bootstrap/cache and compiled views,

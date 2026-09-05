@@ -39,7 +39,10 @@ class ActionController extends Controller
                 ->paginate(50)
                 ->withQueryString(),
 
-            'customers' => Customer::orderBy('name')->get(['id', 'name']),
+            // withTrashed, like the operators below: a removed shop is one of
+            // the things you most want to read the history of, and it is the
+            // one the plain query drops.
+            'customers' => Customer::withTrashed()->orderBy('name')->get(['id', 'name']),
             'operators' => User::withTrashed()->orderBy('name')->get(['id', 'name']),
 
             // What has actually happened, rather than a list of everything the

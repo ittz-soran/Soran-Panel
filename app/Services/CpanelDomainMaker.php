@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Contracts\DomainMaker;
+use App\Support\HomeFolder;
 use App\Support\Uapi;
 use RuntimeException;
 use Throwable;
@@ -46,6 +47,23 @@ class CpanelDomainMaker implements DomainMaker
             return [];
         } catch (Throwable $e) {
             return ["the domain [{$host}] ({$e->getMessage()})"];
+        }
+    }
+
+    public function secure(string $host): ?string
+    {
+        try {
+            /*
+             * The account-wide run, because that is what cPanel offers: AutoSSL
+             * looks at every domain that has none. It is asynchronous, so a
+             * success here means "asked", not "issued".
+             */
+            $this->uapi->call('SSL', 'start_autossl_check', []);
+
+            return null;
+        } catch (Throwable $e) {
+            return "A certificate for {$host} was not requested — {$e->getMessage()} cPanel runs AutoSSL on "
+                .'its own schedule anyway, so this usually sorts itself out; SSL/TLS Status has a button if not.';
         }
     }
 
@@ -94,12 +112,13 @@ class CpanelDomainMaker implements DomainMaker
      */
     private function relativeToHome(string $documentRoot): string
     {
-        $home = rtrim((string) (getenv('HOME') ?: config('panel.cpanel.home')), '/');
+        $home = HomeFolder::find();
 
         if ($home === '') {
             throw new RuntimeException(
-                'The home folder is not known, and a document root has to be given relative to it. '
-                .'Set PANEL_CPANEL_HOME in the panel’s .env — it is what `echo $HOME` prints on the server.',
+                'The home folder is not known — neither $HOME nor the account this runs as would say — '
+                .'and a document root has to be given relative to it. '
+                .'Set PANEL_CPANEL_HOME in the panel’s .env: it is what `echo $HOME` prints on the server.',
             );
         }
 

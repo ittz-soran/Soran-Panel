@@ -29,6 +29,11 @@ class ManualDomainMaker implements DomainMaker
         return [];
     }
 
+    public function secure(string $host): ?string
+    {
+        return null;
+    }
+
     public function describe(): string
     {
         return 'not pointed by the panel — point each shop’s domain by hand';

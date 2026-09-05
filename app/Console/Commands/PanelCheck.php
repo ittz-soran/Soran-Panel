@@ -3,11 +3,13 @@
 namespace App\Console\Commands;
 
 use App\Contracts\DatabaseMaker;
+use App\Contracts\DnsMaker;
 use App\Contracts\DomainMaker;
 use App\Models\Customer;
 use App\Models\HealthCheck;
 use App\Models\User;
 use App\Services\CpanelDatabaseMaker;
+use App\Support\HomeFolder;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -54,6 +56,7 @@ class PanelCheck extends Command
         $this->whereShopsGo();
         $this->makingDatabases();
         $this->pointingDomains();
+        $this->publishingNames();
         $this->theSellersKey();
         $this->theLook();
         $this->notServingItsOwnSecrets();
@@ -169,6 +172,53 @@ class PanelCheck extends Command
      * document root field is relative to the home folder, and an absolute path
      * put there serves the domain from a folder that does not exist.
      */
+    /**
+     * Who publishes a shop's name.
+     *
+     * A warning when it is manual, like pointing the domain: a shop whose name
+     * is not published is finished except for one step somewhere else. What
+     * this must catch is the half-configured case — set to publish, and missing
+     * the address or the credentials, which would fail in the middle of making
+     * a customer rather than here.
+     */
+    private function publishingNames(): void
+    {
+        $maker = app(DnsMaker::class);
+
+        $this->check('Publishing a shop’s name', function () use ($maker) {
+            if (! $maker->isAutomatic()) {
+                return ['warn', $maker->describe()];
+            }
+
+            $address = (string) config('panel.dns.address');
+
+            if ($address === '') {
+                throw new \RuntimeException(
+                    'PANEL_SERVER_IP is not set, so the panel does not know what to point records at',
+                );
+            }
+
+            if (filter_var($address, FILTER_VALIDATE_IP) === false) {
+                throw new \RuntimeException("[{$address}] is not an IP address");
+            }
+
+            if ((string) config('panel.dns.cloudflare.token') === '') {
+                throw new \RuntimeException('PANEL_CLOUDFLARE_TOKEN is not set');
+            }
+
+            if ((string) config('panel.dns.cloudflare.zone_id') === '') {
+                throw new \RuntimeException('PANEL_CLOUDFLARE_ZONE_ID is not set');
+            }
+
+            // And ask Cloudflare, rather than only reading the settings: a
+            // wrong or expired token looks identical in a config file.
+            return ['ok', $maker->verify().", pointing at [{$address}]"];
+        }, $maker->isAutomatic()
+            ? 'Set PANEL_SERVER_IP, PANEL_CLOUDFLARE_TOKEN and PANEL_CLOUDFLARE_ZONE_ID.'
+            : 'Set PANEL_DNS_MAKER=cloudflare to have the panel publish names itself — and read the note in '
+              .'config/panel.php first, because that token can repoint every domain you own.');
+    }
+
     private function pointingDomains(): void
     {
         $maker = app(DomainMaker::class);
@@ -185,7 +235,7 @@ class PanelCheck extends Command
                 throw new \RuntimeException("cPanel’s uapi is not at [{$uapi}]");
             }
 
-            $home = rtrim((string) (getenv('HOME') ?: config('panel.cpanel.home')), '/');
+            $home = HomeFolder::find();
             $public = rtrim((string) config('panel.shops.public_root'), '/');
 
             if ($home === '') {
@@ -202,7 +252,7 @@ class PanelCheck extends Command
 
             return ['ok', $maker->describe().", document roots under [{$home}]"];
         }, $maker->isAutomatic()
-            ? 'Set PANEL_UAPI, and PANEL_CPANEL_HOME if $HOME is not readable.'
+            ? 'Set PANEL_UAPI, and PANEL_CPANEL_HOME if the home folder above is not the account’s.'
             : 'Set PANEL_DOMAIN_MAKER=cpanel on the server to have the panel point domains itself.');
     }
 

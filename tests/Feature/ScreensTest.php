@@ -357,13 +357,34 @@ class ScreensTest extends TestCase
             ->assertSee('No licence has been delivered to this shop.');
     }
 
-    /** Deleting a customer hides them; their page must not 404 into a stack trace. */
-    public function test_a_deleted_customer_is_not_reachable(): void
+    /**
+     * A soft-deleted customer is a REMOVED shop, and its page stays.
+     *
+     * This test used to assert the opposite — that the page 404s — and it was
+     * right while nothing could remove a shop, because a hidden customer then
+     * meant somebody had tidied a live one out of the list. `ShopRemover` gave
+     * the flag a meaning: the folders, the subdomain and the database are gone.
+     *
+     * What is left is the record, and Section 5 is explicit that the licence
+     * history and the payments outlive the customer. A 404 would make every
+     * penny a closed shop ever paid unreachable, so the page is readable and it
+     * is the CONTROLS that are gone — checked below, and by RemoveShopTest.
+     */
+    public function test_a_removed_customers_page_is_still_readable_but_does_nothing(): void
     {
         $customer = Customer::factory()->create();
         $customer->delete();
 
-        $this->get(route('customers.show', $customer))->assertNotFound();
+        $this->get(route('customers.show', $customer))
+            ->assertOk()
+            ->assertSee('This shop was removed')
+            ->assertDontSee('Danger zone');
+
+        // Every route that would change a shop refuses to find a removed one.
+        $this->post(route('customers.suspend', $customer))->assertNotFound();
+        $this->post(route('customers.resume', $customer))->assertNotFound();
+        $this->get(route('customers.renew', $customer))->assertNotFound();
+        $this->delete(route('customers.remove', $customer))->assertNotFound();
     }
 
     /**

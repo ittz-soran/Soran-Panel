@@ -3,14 +3,17 @@
 namespace App\Providers;
 
 use App\Contracts\DatabaseMaker;
+use App\Contracts\DnsMaker;
 use App\Contracts\DomainMaker;
 use App\Contracts\ShopReader;
 use App\Contracts\ShopWriter;
+use App\Services\CloudflareDns;
 use App\Services\CpanelDatabaseMaker;
 use App\Services\CpanelDomainMaker;
 use App\Services\DirectDatabaseMaker;
 use App\Services\LocalShopReader;
 use App\Services\LocalShopWriter;
+use App\Services\ManualDns;
 use App\Services\ManualDomainMaker;
 use Illuminate\Support\ServiceProvider;
 
@@ -39,6 +42,10 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(DomainMaker::class, fn () => config('panel.domain_maker.driver') === 'cpanel'
             ? new CpanelDomainMaker
             : new ManualDomainMaker);
+
+        $this->app->bind(DnsMaker::class, fn () => config('panel.dns.driver') === 'cloudflare'
+            ? new CloudflareDns
+            : new ManualDns);
     }
 
     public function boot(): void

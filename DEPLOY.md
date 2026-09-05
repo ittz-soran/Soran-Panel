@@ -322,6 +322,12 @@ PANEL_SHARED_ARTISAN=/home/soransto/smart-store/artisan
 
 # Let the panel point each shop's domain itself
 PANEL_DOMAIN_MAKER=cpanel
+
+# Where a removed shop's last backup is kept. Empty is right here: it means
+# ~/panel/storage/app/removed-shops. It must never be inside the two folders
+# above, because removing a shop deletes both — the panel refuses rather than
+# destroying the backup with the thing it was insurance for.
+PANEL_REMOVED_SHOPS=
 ```
 
 ⚠️ **Set `PANEL_DOMAIN_MAKER=cpanel` on the server.** With it on, the panel
@@ -446,6 +452,47 @@ thing missing is the certificate.
 **Check:** `https://panel.soranstore.com/login` shows the sign-in screen, and
 `https://panel.soranstore.com/.env` does **not** show a file. It should be a
 404 or a 403; anything else means the code is inside the document root.
+
+### 6d. Letting the panel do 6b and 6c itself
+
+Everything in 6b and 6c is a Cloudflare record and an AutoSSL run, and the
+panel can do both as part of making a shop. It is **off by default**, and that
+is a decision rather than an oversight — read the warning before turning it on.
+
+```
+PANEL_DNS_MAKER=cloudflare
+PANEL_SERVER_IP=192.250.234.174
+PANEL_CLOUDFLARE_TOKEN=…
+PANEL_CLOUDFLARE_ZONE_ID=…
+PANEL_CLOUDFLARE_PROXIED=false
+```
+
+⚠️ **The token must be a scoped `Zone:DNS:Edit` token on the one zone, and
+never a Global API Key.** A Global key is your whole Cloudflare account. Even
+the scoped token can rewrite where every one of these domains points, so a
+break-in on this server could send the entire business somewhere else — which
+is a larger loss than the panel's database. What it buys is about thirty
+seconds a shop. Leave it out and 6b and 6c stay manual, which is a perfectly
+good answer.
+
+Make the token at **My Profile → API Tokens → Create Token → Edit zone DNS**,
+and restrict it to `soranstore.com` alone. The zone ID is on the zone's
+**Overview** page, bottom right.
+
+`PANEL_SERVER_IP` is what the record should point at — the panel will not guess
+it, because a server has several addresses and none of them is reliably the one
+the account answers on.
+
+`PANEL_CLOUDFLARE_PROXIED=false` is 6c's order in a setting: a new shop goes up
+grey-clouded so AutoSSL has something to validate against, and you turn the
+proxy on afterwards.
+
+**Check** — this asks Cloudflare a real question with the real token, rather
+than checking that the settings look filled in:
+
+```bash
+php artisan panel:check
+```
 
 ---
 

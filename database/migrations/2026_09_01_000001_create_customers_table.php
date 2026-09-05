@@ -25,10 +25,16 @@ return new class extends Migration
             $table->string('phone')->nullable();
             $table->string('email')->nullable();
 
-            // What the licence binds to. Unique because a licence names one
-            // host and will not run on another, so two customers on one host
-            // is not a clash to resolve later — it is a licence that cannot be
-            // issued correctly for either of them.
+            /*
+             * What the licence binds to. A licence names one host and will not
+             * run on another, so two LIVE customers on one host is not a clash
+             * to resolve later — it is a licence that cannot be issued
+             * correctly for either of them.
+             *
+             * It was unique here until a later migration took that off; see
+             * 2026_09_06_000001 for why a removed shop has to be able to give
+             * its host back, and where the rule lives now.
+             */
             $table->string('host')->unique();
 
             // Where this install lives, as `shop:provision` made it.

@@ -3,12 +3,14 @@
 namespace App\Services;
 
 use App\Contracts\DatabaseMaker;
+use App\Contracts\DnsMaker;
 use App\Contracts\DomainMaker;
 use App\Contracts\ShopWriter;
 use App\Models\Action;
 use App\Models\Customer;
 use App\Support\ReadOnlyConnection;
 use App\Support\ShopEnvironment;
+use App\Support\ShopFolder;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -54,6 +56,7 @@ class ShopProvisioner
     public function __construct(
         private readonly DatabaseMaker $databases,
         private readonly DomainMaker $domains,
+        private readonly DnsMaker $dns,
         private readonly LicenceDelivery $delivery,
         private readonly ShopWriter $writer,
     ) {}
@@ -93,7 +96,7 @@ class ShopProvisioner
          * empties it and leaves the folder, or that person's subdomain is left
          * pointing at nothing.
          */
-        $made = ['database' => false, 'domain' => false, 'folder' => false,
+        $made = ['database' => false, 'domain' => false, 'dns' => false, 'folder' => false,
             'document_root' => ! is_dir($paths['public'])];
         $warnings = [];
 
@@ -114,6 +117,12 @@ class ShopProvisioner
              */
             $this->domains->create($wanted['host'], $paths['public']);
             $made['domain'] = true;
+
+            // And publish the name, so the world can find the server the
+            // domain now points at. Two different authorities, two steps —
+            // doing only the first gives a correct site nobody can reach.
+            $this->publish($wanted['host']);
+            $made['dns'] = true;
 
             $this->provision($short, $paths, $wanted, $database, $user, $password);
             $made['folder'] = true;
@@ -145,6 +154,16 @@ class ShopProvisioner
                 .($left === [] ? ' Everything this made has been taken back.' : ' Left behind: '.implode(', ', $left).'.'),
                 previous: $e,
             );
+        }
+
+        /*
+         * A certificate, asked for after the shop is real and outside the
+         * rollback. It usually fails the first time — DNS was published seconds
+         * ago and has not reached whoever checks it — and that is a thing to
+         * finish, never a reason to take a working shop apart.
+         */
+        if ($problem = $this->domains->secure($wanted['host'])) {
+            $warnings[] = $problem;
         }
 
         Action::record('customer.created', $customer, [
@@ -220,6 +239,7 @@ class ShopProvisioner
         $warnings = [];
         $madeFolder = false;
         $madeDomain = false;
+        $madeDns = false;
         $madeDocumentRoot = ! is_dir($paths['public']);
 
         try {
@@ -247,6 +267,9 @@ class ShopProvisioner
             // conversion is done once in tested code.
             $this->domains->create($wanted['host'], $paths['public']);
             $madeDomain = true;
+
+            $this->publish($wanted['host']);
+            $madeDns = true;
 
             $this->provision(
                 $short, $paths, $wanted,
@@ -309,6 +332,10 @@ class ShopProvisioner
              */
             $left = [];
 
+            if ($madeDns) {
+                $left = [...$left, ...$this->dns->remove($wanted['host'])];
+            }
+
             if ($madeDomain) {
                 $left = [...$left, ...$this->domains->remove($wanted['host'])];
             }
@@ -317,11 +344,11 @@ class ShopProvisioner
                 // Their document root, if somebody else made it, is emptied and
                 // not removed — see rollBack(). A subdomain pointing at nothing
                 // is a worse mess than the half-made folder this is clearing.
-                if (! $this->deleteFolder($paths['public'], keepTheFolderItself: ! $madeDocumentRoot)) {
+                if (! ShopFolder::delete($paths['public'], keepTheFolderItself: ! $madeDocumentRoot)) {
                     $left[] = "the folder [{$paths['public']}]";
                 }
 
-                if (! $this->deleteFolder($paths['home'])) {
+                if (! ShopFolder::delete($paths['home'])) {
                     $left[] = "the folder [{$paths['home']}]";
                 }
             }
@@ -332,6 +359,10 @@ class ShopProvisioner
                 .($left === [] ? '' : ' Left behind: '.implode(', ', $left).'.'),
                 previous: $e,
             );
+        }
+
+        if ($problem = $this->domains->secure($wanted['host'])) {
+            $warnings[] = $problem;
         }
 
         Action::record('customer.taken_on', $customer, [
@@ -356,6 +387,29 @@ class ShopProvisioner
             'migrations_run' => max(0, $after - $before),
             'warnings' => $warnings,
         ];
+    }
+
+    /**
+     * Publish the name, at whatever holds the zone.
+     *
+     * The address is a setting rather than something worked out here: the panel
+     * can see plenty of IP addresses and none of them is reliably the one the
+     * account answers on — a container's own address, an outbound NAT address,
+     * whatever a DNS lookup of the panel's hostname returns through a proxy.
+     * Guessing wrongly publishes a name pointing at somebody else's server.
+     */
+    private function publish(string $host): void
+    {
+        $address = (string) config('panel.dns.address');
+
+        if ($address === '' && $this->dns->isAutomatic()) {
+            throw new RuntimeException(
+                'The panel is set to publish DNS records but PANEL_SERVER_IP is not set, so it does not know '
+                .'what to point them at. It is the account’s shared IP address, on cPanel’s home page.',
+            );
+        }
+
+        $this->dns->create($host, $address);
     }
 
     /**
@@ -537,7 +591,21 @@ class ShopProvisioner
      */
     private function refuseIfAnythingIsInTheWay(array $paths, string $host): void
     {
-        if (Customer::withTrashed()->where('host', $host)->exists()) {
+        /*
+         * A REMOVED customer does not hold its host. `withTrashed()` was right
+         * while nothing could remove a shop — a soft-deleted row then meant
+         * somebody had hidden a customer whose install was still standing. Now
+         * that ShopRemover exists, a trashed row means the opposite: its
+         * folders, its subdomain and its database are gone, proved by the
+         * removal itself. Keeping the host reserved after that would mean a
+         * shop can never be rebuilt under the name it had, which is exactly
+         * what removing-and-recreating is for.
+         *
+         * Nothing is lost by letting it go, because a removal that only partly
+         * worked leaves the folders behind — and the two checks below refuse on
+         * those, whatever the customers table says.
+         */
+        if (Customer::where('host', $host)->exists()) {
             throw new RuntimeException("There is already a customer on {$host}.");
         }
 
@@ -670,6 +738,13 @@ class ShopProvisioner
          * into — a live address serving nothing — and taking it off before the
          * folder means there is never a moment where that is true.
          */
+        // The published name first of all: a record pointing at a shop that is
+        // being taken apart is a live address serving wreckage, and it is the
+        // only piece of this a stranger can see.
+        if ($made['dns']) {
+            $left = [...$left, ...$this->dns->remove($host)];
+        }
+
         if ($made['domain']) {
             $left = [...$left, ...$this->domains->remove($host)];
         }
@@ -679,11 +754,11 @@ class ShopProvisioner
             // folder itself — removing a subdomain's document root leaves the
             // domain pointing at nothing, which is a worse mess than the
             // half-made shop this is cleaning up.
-            if (! $this->deleteFolder($paths['public'], keepTheFolderItself: ! $made['document_root'])) {
+            if (! ShopFolder::delete($paths['public'], keepTheFolderItself: ! $made['document_root'])) {
                 $left[] = "the folder [{$paths['public']}]";
             }
 
-            if (! $this->deleteFolder($paths['home'])) {
+            if (! ShopFolder::delete($paths['home'])) {
                 $left[] = "the folder [{$paths['home']}]";
             }
         }
@@ -693,56 +768,6 @@ class ShopProvisioner
         }
 
         return $left;
-    }
-
-    private function deleteFolder(string $path, bool $keepTheFolderItself = false): bool
-    {
-        if (! is_dir($path)) {
-            return true;
-        }
-
-        /*
-         * Only under a folder this panel was told to use. A bug in the path
-         * building must not be able to hand a recursive delete a shorter path
-         * than it meant to.
-         *
-         * BOTH roots, because Section 4 forced them apart: a shop's private
-         * folder is outside public_html and its public folder must be inside
-         * it, so they are two different trees. The first version checked only
-         * the shops root, which quietly left every rolled-back shop's public
-         * folder standing — a folder that looks provisioned is one somebody
-         * later points a domain at, which is the exact thing rolling back is
-         * for.
-         */
-        $roots = array_filter([
-            rtrim((string) config('panel.shops.home_root'), '/'),
-            rtrim((string) config('panel.shops.public_root'), '/'),
-        ]);
-
-        $real = realpath($path) ?: $path;
-
-        $allowed = false;
-
-        foreach ($roots as $root) {
-            if (str_starts_with($real, $root.'/')) {
-                $allowed = true;
-            }
-        }
-
-        if (! $allowed) {
-            return false;
-        }
-
-        $entries = new \RecursiveIteratorIterator(
-            new \RecursiveDirectoryIterator($path, \FilesystemIterator::SKIP_DOTS),
-            \RecursiveIteratorIterator::CHILD_FIRST,
-        );
-
-        foreach ($entries as $entry) {
-            $entry->isDir() && ! $entry->isLink() ? @rmdir($entry->getPathname()) : @unlink($entry->getPathname());
-        }
-
-        return $keepTheFolderItself ? true : @rmdir($path);
     }
 
     /** @return array{home: string, public: string} */

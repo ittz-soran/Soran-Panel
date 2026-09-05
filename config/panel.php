@@ -83,6 +83,15 @@ return [
         'home_root' => env('PANEL_SHOPS_HOME', '/home/soransto/shops'),
         'public_root' => env('PANEL_SHOPS_PUBLIC', '/home/soransto/public_html'),
         'shared_artisan' => env('PANEL_SHARED_ARTISAN', '/home/soransto/smart-store/artisan'),
+
+        /*
+         * Where a removed shop's last backup is kept — see ShopRemover.
+         *
+         * It must not be under either root above, because both are deleted by
+         * the removal it is insurance against. Empty means the panel's own
+         * storage folder, which is the right answer on this account.
+         */
+        'removed_root' => env('PANEL_REMOVED_SHOPS', ''),
     ],
 
     /*
@@ -100,9 +109,11 @@ return [
 
         /*
          * The account's home folder, used to turn an absolute document root
-         * into the home-relative one cPanel's `dir` wants. Read from the
-         * environment first, because that is always right on the real account;
-         * this is the answer when there is no HOME to read.
+         * into the home-relative one cPanel's `dir` wants.
+         *
+         * Optional, and set here it wins: App\Support\HomeFolder falls back to
+         * $HOME and then to the account this process runs as. Leave it empty
+         * unless the panel runs as one user on behalf of another.
          */
         'home' => env('PANEL_CPANEL_HOME', ''),
     ],
@@ -116,6 +127,36 @@ return [
      */
     'domain_maker' => [
         'driver' => env('PANEL_DOMAIN_MAKER', 'manual'),
+    ],
+
+    /*
+     * Who publishes a shop's name, so the world can find it.
+     *
+     * ⚠️ Off by default, and that is a decision rather than caution. Turning it
+     * on means keeping a token on this server that can rewrite where every one
+     * of these domains points — a break-in could send the whole business
+     * somewhere else, which is a larger thing than reading the panel's
+     * database. Weigh it against thirty seconds of work per shop.
+     *
+     * If it is on, the token must be a Cloudflare SCOPED token with
+     * Zone:DNS:Edit on one zone. Never a Global API Key.
+     */
+    'dns' => [
+        'driver' => env('PANEL_DNS_MAKER', 'manual'),
+
+        // What a shop's record points at. The account's shared IP, which
+        // cPanel shows on its home page and `uapi DomainInfo` reports.
+        'address' => env('PANEL_SERVER_IP', ''),
+
+        'cloudflare' => [
+            'token' => env('PANEL_CLOUDFLARE_TOKEN', ''),
+            'zone_id' => env('PANEL_CLOUDFLARE_ZONE_ID', ''),
+
+            // Orange cloud. Section 4 wants Full (strict), which needs the
+            // origin to have a certificate first — so a brand new shop goes up
+            // unproxied unless this is turned on deliberately.
+            'proxied' => (bool) env('PANEL_CLOUDFLARE_PROXIED', false),
+        ],
     ],
 
     'attention' => [
