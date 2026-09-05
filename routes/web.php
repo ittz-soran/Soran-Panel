@@ -8,6 +8,7 @@ use App\Http\Controllers\LicenceController;
 use App\Http\Controllers\NewCustomerController;
 use App\Http\Controllers\OperatorController;
 use App\Http\Controllers\OverviewController;
+use App\Http\Controllers\RemoveShopController;
 use App\Http\Controllers\SubscriptionController;
 use App\Http\Controllers\TakeOnController;
 use App\Http\Controllers\UpdateController;
@@ -38,7 +39,12 @@ Route::middleware('auth')->group(function () {
     // whose database was deliberately kept.
     Route::get('customers/take-on', [TakeOnController::class, 'create'])->name('customers.take-on');
     Route::post('customers/take-on', [TakeOnController::class, 'store'])->name('customers.take-on.store');
-    Route::get('customers/{customer}', [CustomerController::class, 'show'])->name('customers.show');
+    // withTrashed, and only here. A removed shop's licence history and its
+    // payments outlive it (Section 5), so its page has to stay readable at the
+    // same address. Every route that CHANGES a shop is left without it, so a
+    // removed one 404s rather than being suspended, renewed or removed twice.
+    Route::get('customers/{customer}', [CustomerController::class, 'show'])
+        ->withTrashed()->name('customers.show');
 
     // Renew — Section 6. The panel shows a command and takes a paste; it never
     // signs anything, because the private key never reaches this server.
@@ -55,6 +61,9 @@ Route::middleware('auth')->group(function () {
     Route::post('customers/{customer}/storage', [CustomerController::class, 'storageLimit'])->name('customers.storage');
     Route::post('customers/{customer}/suspend', [CustomerController::class, 'suspend'])->name('customers.suspend');
     Route::post('customers/{customer}/resume', [CustomerController::class, 'resume'])->name('customers.resume');
+
+    // The one thing here that cannot be undone. Its rules are in ShopRemover.
+    Route::delete('customers/{customer}', [RemoveShopController::class, 'destroy'])->name('customers.remove');
 
     /*
      * What version the code is on, and taking the next one from GitHub.

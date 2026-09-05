@@ -244,10 +244,53 @@ Soran chose: **everything, with a hold-to-confirm on anything destructive.** The
 | Run a shop's backup, and download it | Logged. |
 | Run a shop's migrations | Hold to confirm. Backup taken first. |
 | Read a shop's health and data check | Read-only by construction. |
+| **Remove a shop for good** | Suspended first. A dump of its database, copied out of reach, before anything. Hold to confirm, typed host. |
 
 **The same guard rails as the shop system** (PROJECT_DOC Section 9b): a two-second hold and a typed confirmation for anything that cannot be undone, the reason shown on a disabled button rather than discovered after pressing it, and a backup before anything irreversible.
 
-**What it may never do:** write to a shop's business tables, delete a shop's database, or hold the private key.
+**What it may never do:** write to a shop's business tables, or hold the private key.
+
+**⚠️ This used to say "or delete a shop's database", and Soran changed it on
+2026-09-06.** The old rule cost nothing while the panel had no way to remove
+anything — but a panel that creates and never deletes leaves every trial, every
+rehearsal and every mistake on the account for ever: a database, two folders, a
+subdomain and a DNS record each. And because `refuseIfAnythingIsInTheWay` does
+its job, that wreckage is also what stops the same name being used again. A rule
+that leaves data lying about until somebody clears it by hand, in a hurry, is
+not caution.
+
+So the panel may drop a shop's database, and **only** like this:
+
+1. **It must not be trading.** Suspending is the reversible half — if the wrong
+   shop goes quiet you hear about it in minutes and put the licence straight
+   back. Removal has no equivalent, so it is only offered on a shop that has
+   already survived the reversible version.
+2. **A dump of their database is taken and copied somewhere the removal cannot
+   reach**, before anything else happens. Their own `backup:run`, because a
+   restore later expects that shape — and *copied*, because the shop system
+   writes its backups inside the shop's own folder, which step 4 deletes.
+   A dump that fails, or that exits zero and leaves no file, stops everything:
+   nothing has been touched.
+3. Hold to confirm, and the host typed exactly — the same rails as suspending.
+4. Then, outside in: the DNS record, the subdomain, the public folder, the
+   private folder, the database and its user. Outside in, so there is never a
+   moment where a live address points at wreckage.
+5. **The customer row is kept.** Marked ended, soft deleted, and still readable
+   at the same address — Section 5 says the licence history and the payments
+   outlive the customer, and tidying the row away would destroy the money
+   record with it.
+
+Steps 2 and 5 are what make the rest safe, and both are held by
+`RemoveShopTest`. `App\Services\ShopRemover` is all of it.
+
+Two things had to change to make step 5 work, and both are worth knowing:
+`Action`'s `customer()` and `user()` relations are `withTrashed()`, because a
+BelongsTo applies the other model's soft-delete scope — so the log lost the name
+at the exact moment the subject was removed, which is when a log is for. And
+`customers.host` is no longer unique in the schema: neither MariaDB nor SQLite
+can express "unique among the rows that are not deleted", so the rule moved into
+the application, where it was already stated twice. The migration
+`2026_09_06_000001` argues it in full.
 
 **Suspending uses the licence as the lever.** Taking `LICENCE_KEY` out of a shop's `.env` puts it in the state the shop system already has a considered answer for: read-only, with reading, printing, deleting and signing in untouched. PROJECT_DOC is explicit that a shop locked out of its own records is a shop that will never pay another invoice — and being paid is the point of suspending somebody. Resuming puts the same string back; nothing new is signed.
 
@@ -284,7 +327,7 @@ Mockups were built and approved against the shop system's own stylesheet, so the
 |---|---|
 | **Overview** | Only what needs Soran this week: licences running out, storage near its limit, shops nobody has used. Everything else is a number. |
 | **Customers** | The working screen. Shop, licence state, expiry, storage, last used, schema, monthly fee. Filter by "needs chasing". |
-| **One customer** | Licence with its full history, storage broken into database/backups/uploads, whether they are actually using it, its schema state, and the danger zone. |
+| **One customer** | Licence with its full history, storage broken into database/backups/uploads, whether they are actually using it, its schema state, and the danger zone. A REMOVED shop keeps this page at the same address — the controls are replaced by a note saying when it went and where its last backup is, because the licences and payments below them outlive the shop. |
 | **Renew** | The paste-and-verify flow from Section 6, with what-will-happen shown beside it. |
 | **New customer** | One form replacing six manual steps. |
 | **Subscriptions** | Who has paid, who has not, what the month is worth. |
@@ -389,6 +432,7 @@ that unlikely rather than impossible.
 
 | Date | Done | Next |
 |---|---|---|
+| 2026-09-06 | **Remove a shop** — the create-but-never-delete gap, and the one thing here that nothing can undo. Section 7's "never delete a shop's database" is rewritten above with the reason: the old rule cost nothing while nothing could be removed, and once removal exists it only means every trial and every mistake stays on the account for ever — including as the wreckage that stops the same name being reused. The rule that replaces it is a sequence, and **the first step is the whole design**: a dump of their database, taken with their own `backup:run` and **copied out of the shop's folder**, because the shop system writes backups inside the folder step 4 deletes. If the dump fails, or exits zero and leaves no file, nothing is touched at all. Then outside in — DNS, subdomain, public folder, private folder, database — so no live address ever points at wreckage, and teardown never stops at the first failure: what could not be removed is reported and the rest still happens. Only a suspended shop may be removed, because suspending is the reversible half and removal has no equivalent. **Three things this turned up that were not the feature.** `Action`'s `customer()` and `user()` are now `withTrashed()`: a BelongsTo applies the other model's soft-delete scope, so the log lost the shop's name at the exact moment it was removed — the record with a name on it, blank on the one record that most needs one. **`customers.host` was unique in the schema**, so a removed shop could never give its name back however the application felt about it; the test written to prove reuse worked is what found it, and neither MariaDB nor SQLite can express "unique among the rows that are not deleted" — a composite on `(host, deleted_at)` looks right and would have allowed two LIVE customers to share a host, because both engines treat NULLs in a unique index as distinct. The rule moved into the application, where it was already stated twice. And `ScreensTest` asserted a soft-deleted customer's page must 404, which was right until the flag meant "removed" — now the page stays and the controls go, because a 404 would make every penny a closed shop ever paid unreachable. Also extracted `ShopFolder`, so the recursive delete and its root guard exist once rather than beside each caller. Suite: 445 tests, 445 passing, on both engines. | Back up the panel's own database — it holds the customer list, the licence history and the payment record, and nothing does it yet |
 | 2026-09-02 | **Two bugs in `.env.example` that CI caught and no local run could have.** The workflow does `cp .env.example .env` before anything else, so the template is not documentation — it is the environment the suite runs in, and DEPLOY.md step 2 tells Soran to do exactly the same on the server. First: a Windows path written in **double** quotes, where dotenv reads `\s` and `\p` as escape sequences it does not know and refuses the WHOLE file — `key:generate` failed and both jobs went red on a file no test had ever opened. Second, and worse: `LICENCE_PUBLIC_KEY=` left set-but-empty. `env('X', 'default')` returns the default when X is **absent** and an empty string when X is **present and blank**, so the committed key was overridden by nothing — a panel deployed from that template would refuse every licence pasted into it as "not signed by your key", giving no hint why. The template's own comment claimed the opposite. Both are now held: one test parses `.env.example` and names the failure, another refuses a set-but-empty key that has a committed default. Running the suite with the template as `.env`, the way CI does, is what surfaced the second one — the dev machine's own `.env` had hidden it. A third followed from the same cause: `panel:check` failed CI because `public/build` is gitignored — Section 10 has it copied in at deploy time — so a fresh clone legitimately has no stylesheet. Missing assets are a failure on a server and ordinary anywhere else, the same split already used for `APP_DEBUG`; and the first attempt at that had the condition inverted, throwing on a laptop and warning on a server, caught by re-reading the diff before pushing. Suite: 331 tests, 0 failing, on both engines and under CI's own environment — the template as `.env`, with no `public/build`. | Soran's own shop (step 10) |
 | 2026-09-02 | **Deploy** (build order step 9) — everything for it that could be done from here, and it is more than a document. The panel is deployed the way a shop is: `php artisan panel:public <folder>` writes the five files the web may see into a folder inside `public_html`, with an `index.php` that names the panel's base absolutely, because Section 4 measured that a document root cannot leave `public_html` and `..` from there is not the panel. **Verified by building that arrangement and serving the panel through it**: signed in, all six pages 200, fully styled, and `.env`, `artisan`, `config/panel.php` and the log all unreachable — the code is not under the document root at all. **The panel had no deny-all `.htaccess` and the shop system did**, which is the gap that made Section 4's Halabja finding possible, and the panel's `.env` is worth more than any one shop's: it now has one, `public/` grants itself back, and a test holds both. `panel:check` grew the production half — debug off, key set, https, folders writable, cron actually running, and its own `.env` not on the web — and judges those only where they apply, because `APP_DEBUG=on` is the right answer on a laptop and a check that goes red for being a laptop is one nobody reads. `DEPLOY.md` is the ordered cPanel checklist, marking ⚠️ the three things only the real account can confirm: UAPI, the cron PHP path, and the subdomain's document root. Suite: 327 tests, 327 passing, on both engines. | Soran's own shop, then Halabja-phone rebuilt through the panel (step 10) |
 | 2026-09-01 | **Subscriptions and payments** (build order step 8), and the last two Section 9 pages — **Health** and **What I changed** — which had no step of their own and would otherwise never have been built. Every page Section 9 names now exists; a test opens each one from the sidebar and fails if any is still a dead entry. Subscriptions reads no licence, deliberately: money and permission-to-trade come apart exactly when it matters, and owing is asked as "nobody has paid for a period that reaches today", which covers the customer who never paid at all without a second clause. Payments can be recorded, corrected and removed — removed ones stop counting and stay on record, because a payment that can vanish is one somebody can deny receiving. Two things found by looking at the screens rather than by a test. **An ended shop was shown as "24 months" behind** while the Owing filter correctly left it out — the model disagreed with its own scope, and a shop that has stopped trading owes nothing. And **a health check older than a licence was being reported as the shop disagreeing with the panel**: straight after a renewal the newest reading predates the licence, so the customer page cried wolf about a shop that had just answered `valid` — it now only compares readings taken since `delivered_at`. Also **`php artisan panel:check`**, because Soran is testing on a local machine and the panel runs on cPanel: it asks every setting a real question and names the wrong one, instead of letting it surface halfway through creating a customer. With a documented `.env.example` carrying both sets of answers. Suite: 312 tests, 312 passing, on both engines; driven in Chromium against four shops with real money data, and a payment recorded through the real form with the two-second hold. | Deploy (step 9), then Soran's own shop (step 10) |

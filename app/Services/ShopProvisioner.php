@@ -10,6 +10,7 @@ use App\Models\Action;
 use App\Models\Customer;
 use App\Support\ReadOnlyConnection;
 use App\Support\ShopEnvironment;
+use App\Support\ShopFolder;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -343,11 +344,11 @@ class ShopProvisioner
                 // Their document root, if somebody else made it, is emptied and
                 // not removed — see rollBack(). A subdomain pointing at nothing
                 // is a worse mess than the half-made folder this is clearing.
-                if (! $this->deleteFolder($paths['public'], keepTheFolderItself: ! $madeDocumentRoot)) {
+                if (! ShopFolder::delete($paths['public'], keepTheFolderItself: ! $madeDocumentRoot)) {
                     $left[] = "the folder [{$paths['public']}]";
                 }
 
-                if (! $this->deleteFolder($paths['home'])) {
+                if (! ShopFolder::delete($paths['home'])) {
                     $left[] = "the folder [{$paths['home']}]";
                 }
             }
@@ -590,7 +591,21 @@ class ShopProvisioner
      */
     private function refuseIfAnythingIsInTheWay(array $paths, string $host): void
     {
-        if (Customer::withTrashed()->where('host', $host)->exists()) {
+        /*
+         * A REMOVED customer does not hold its host. `withTrashed()` was right
+         * while nothing could remove a shop — a soft-deleted row then meant
+         * somebody had hidden a customer whose install was still standing. Now
+         * that ShopRemover exists, a trashed row means the opposite: its
+         * folders, its subdomain and its database are gone, proved by the
+         * removal itself. Keeping the host reserved after that would mean a
+         * shop can never be rebuilt under the name it had, which is exactly
+         * what removing-and-recreating is for.
+         *
+         * Nothing is lost by letting it go, because a removal that only partly
+         * worked leaves the folders behind — and the two checks below refuse on
+         * those, whatever the customers table says.
+         */
+        if (Customer::where('host', $host)->exists()) {
             throw new RuntimeException("There is already a customer on {$host}.");
         }
 
@@ -739,11 +754,11 @@ class ShopProvisioner
             // folder itself — removing a subdomain's document root leaves the
             // domain pointing at nothing, which is a worse mess than the
             // half-made shop this is cleaning up.
-            if (! $this->deleteFolder($paths['public'], keepTheFolderItself: ! $made['document_root'])) {
+            if (! ShopFolder::delete($paths['public'], keepTheFolderItself: ! $made['document_root'])) {
                 $left[] = "the folder [{$paths['public']}]";
             }
 
-            if (! $this->deleteFolder($paths['home'])) {
+            if (! ShopFolder::delete($paths['home'])) {
                 $left[] = "the folder [{$paths['home']}]";
             }
         }
@@ -753,56 +768,6 @@ class ShopProvisioner
         }
 
         return $left;
-    }
-
-    private function deleteFolder(string $path, bool $keepTheFolderItself = false): bool
-    {
-        if (! is_dir($path)) {
-            return true;
-        }
-
-        /*
-         * Only under a folder this panel was told to use. A bug in the path
-         * building must not be able to hand a recursive delete a shorter path
-         * than it meant to.
-         *
-         * BOTH roots, because Section 4 forced them apart: a shop's private
-         * folder is outside public_html and its public folder must be inside
-         * it, so they are two different trees. The first version checked only
-         * the shops root, which quietly left every rolled-back shop's public
-         * folder standing — a folder that looks provisioned is one somebody
-         * later points a domain at, which is the exact thing rolling back is
-         * for.
-         */
-        $roots = array_filter([
-            rtrim((string) config('panel.shops.home_root'), '/'),
-            rtrim((string) config('panel.shops.public_root'), '/'),
-        ]);
-
-        $real = realpath($path) ?: $path;
-
-        $allowed = false;
-
-        foreach ($roots as $root) {
-            if (str_starts_with($real, $root.'/')) {
-                $allowed = true;
-            }
-        }
-
-        if (! $allowed) {
-            return false;
-        }
-
-        $entries = new \RecursiveIteratorIterator(
-            new \RecursiveDirectoryIterator($path, \FilesystemIterator::SKIP_DOTS),
-            \RecursiveIteratorIterator::CHILD_FIRST,
-        );
-
-        foreach ($entries as $entry) {
-            $entry->isDir() && ! $entry->isLink() ? @rmdir($entry->getPathname()) : @unlink($entry->getPathname());
-        }
-
-        return $keepTheFolderItself ? true : @rmdir($path);
     }
 
     /** @return array{home: string, public: string} */

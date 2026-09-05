@@ -407,6 +407,23 @@
     treatment the sidebar gives the pages that do not exist. A section left out
     until step 6 would hide the shape of what this screen becomes.
 --}}
+@if ($customer->trashed())
+    {{--
+        A removed shop. The page stays at the same address because the licence
+        history and the payments below it outlive the shop — Section 5 — and
+        every control is gone because there is nothing left to control.
+    --}}
+    <div class="alert alert-secondary mt-3">
+        <h2 class="h6 mb-1"><i class="bi bi-trash3 me-1"></i>This shop was removed
+            {{ $customer->deleted_at?->diffForHumans() }}.</h2>
+        <p class="small mb-0">
+            Its folders, its subdomain, its DNS record and its database are gone. What you are reading
+            is the record: what it was, every licence it ran on, and everything it paid.
+            <a href="{{ route('actions.index') }}">What I changed</a> has the removal itself, with the
+            backup it was dumped to first.
+        </p>
+    </div>
+@else
 <div class="card border-danger mt-3">
     <div class="card-header bg-danger-subtle text-danger-emphasis">
         <i class="bi bi-exclamation-triangle me-2"></i>Danger zone
@@ -500,10 +517,44 @@
                 </button>
             </li>
         @endforeach
+
+        {{--
+            The one thing on this page that nothing can undo.
+
+            The rule is in ShopRemover and the reason lives on the button, per
+            Section 7: a trading shop cannot be removed at all, and the button
+            says why rather than the press finding out.
+        --}}
+        <li class="list-group-item d-flex flex-wrap justify-content-between align-items-start gap-2">
+            <span>
+                <span class="d-block">Remove this shop</span>
+                <small class="text-secondary">
+                    Dumps their database and copies it to
+                    <code>{{ $removedShopsGoTo }}</code> first — if that fails, nothing is touched.
+                    Then the DNS record, the subdomain, both folders, and the database and its user.
+                    This customer, every licence and every payment stay on record.
+                    <strong>Nothing here can be undone.</strong>
+                </small>
+            </span>
+
+            <x-danger-form
+                :action="route('customers.remove', $customer)"
+                method="DELETE"
+                label="Remove it for ever"
+                :disabled="(bool) $removalBlocked"
+                :reason="$removalBlocked"
+                :confirm="$customer->host"
+                :confirmLabel="'Type '.$customer->host.' to remove it'">
+                <input type="text" name="why" class="form-control form-control-sm mb-2"
+                       placeholder="Why, for the record (optional)" maxlength="255">
+            </x-danger-form>
+        </li>
     </ul>
     <div class="card-footer small text-secondary">
-        The panel may never write to this shop’s business tables, delete its database,
-        or hold the private key — Section 7.
+        The panel may never write to this shop’s business tables or hold the private key — Section 7.
+        It may drop this shop’s database, and only through Remove, and only after a dump it has
+        checked landed somewhere that survives.
     </div>
 </div>
+@endif
 @endsection

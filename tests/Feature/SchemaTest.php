@@ -8,7 +8,6 @@ use App\Models\HealthCheck;
 use App\Models\Licence;
 use App\Models\Payment;
 use App\Models\User;
-use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
@@ -38,14 +37,35 @@ class SchemaTest extends TestCase
         ]));
     }
 
-    /** A licence binds to one host, so two customers cannot share one. */
-    public function test_a_host_belongs_to_one_customer(): void
+    /**
+     * A licence binds to one host, so two LIVE customers cannot share one —
+     * and the rule is no longer the schema's.
+     *
+     * This test used to assert a UniqueConstraintViolationException, and the
+     * index it relied on came off in 2026_09_06_000001: it counted removed
+     * shops too, so a shop could never be rebuilt under the name it traded as.
+     * Neither engine can express "unique among the rows that are not deleted"
+     * — the migration says why — so the rule sits in the application, and this
+     * checks the application rather than pretending the constraint is still
+     * there.
+     */
+    public function test_a_host_belongs_to_one_live_customer(): void
     {
-        Customer::factory()->create(['host' => 'bazaar.soranstore.com']);
-
-        $this->expectException(UniqueConstraintViolationException::class);
+        $this->actingAs(User::factory()->create());
 
         Customer::factory()->create(['host' => 'bazaar.soranstore.com']);
+
+        $this->post(route('customers.store'), [
+            'name' => 'Another Bazaar',
+            'short_name' => 'bazaar2',
+            'host' => 'bazaar.soranstore.com',
+            'contact_name' => 'Someone',
+            'phone' => '07501234567',
+            'monthly_fee' => 50000,
+            'start' => 'trial',
+        ])->assertSessionHasErrors('host');
+
+        $this->assertSame(1, Customer::where('host', 'bazaar.soranstore.com')->count());
     }
 
     /**

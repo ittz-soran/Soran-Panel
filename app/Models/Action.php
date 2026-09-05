@@ -53,13 +53,25 @@ class Action extends Model
         ]);
     }
 
+    /**
+     * ⚠️ `withTrashed`, both of them, and for the same reason.
+     *
+     * Section 1: anything reaching into a customer's install leaves a record
+     * with a name on it. Without this, the two records that most need a name —
+     * the removal of a shop, and whatever the operator who was later removed
+     * did — are the exact two that render as blank, because a BelongsTo applies
+     * the other model's soft-delete scope and quietly returns null.
+     *
+     * A log that loses the name at the moment the subject is deleted is not a
+     * log.
+     */
     public function customer(): BelongsTo
     {
-        return $this->belongsTo(Customer::class);
+        return $this->belongsTo(Customer::class)->withTrashed();
     }
 
     public function user(): BelongsTo
     {
-        return $this->belongsTo(User::class);
+        return $this->belongsTo(User::class)->withTrashed();
     }
 }

@@ -83,6 +83,15 @@ return [
         'home_root' => env('PANEL_SHOPS_HOME', '/home/soransto/shops'),
         'public_root' => env('PANEL_SHOPS_PUBLIC', '/home/soransto/public_html'),
         'shared_artisan' => env('PANEL_SHARED_ARTISAN', '/home/soransto/smart-store/artisan'),
+
+        /*
+         * Where a removed shop's last backup is kept — see ShopRemover.
+         *
+         * It must not be under either root above, because both are deleted by
+         * the removal it is insurance against. Empty means the panel's own
+         * storage folder, which is the right answer on this account.
+         */
+        'removed_root' => env('PANEL_REMOVED_SHOPS', ''),
     ],
 
     /*

@@ -391,6 +391,30 @@ class NewCustomerTest extends TestCase
         $this->assertSame([], self::$created, 'nothing should have been created');
     }
 
+    /**
+     * A REMOVED shop does not keep its name.
+     *
+     * The rule above and `refuseIfAnythingIsInTheWay` both used to count
+     * soft-deleted rows, which was right while nothing could remove a shop. Now
+     * that ShopRemover exists, a trashed row means its folders, its subdomain
+     * and its database have gone — so holding the host after that would mean a
+     * shop can never be rebuilt under the name it traded as, which is most of
+     * what removing one is for.
+     */
+    public function test_a_removed_shop_gives_its_host_back(): void
+    {
+        $before = Customer::factory()->create(['host' => 'hawler.soranstore.com']);
+        $before->delete();
+
+        $this->make()->assertSessionHas('success');
+
+        $this->assertSame(
+            'hawler.soranstore.com',
+            Customer::firstOrFail()->host,
+            'the name of a shop that has been removed is still reserved',
+        );
+    }
+
     public function test_a_short_name_that_is_not_a_folder_name_is_refused(): void
     {
         foreach (['Hawler', 'hawler shop', '9hawler', 'hawler-shop', ''] as $bad) {

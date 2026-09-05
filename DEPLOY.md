@@ -323,6 +323,11 @@ PANEL_SHARED_ARTISAN=/home/soransto/smart-store/artisan
 # Let the panel point each shop's domain itself
 PANEL_DOMAIN_MAKER=cpanel
 
+# Where a removed shop's last backup is kept. Empty is right here: it means
+# ~/panel/storage/app/removed-shops. It must never be inside the two folders
+# above, because removing a shop deletes both — the panel refuses rather than
+# destroying the backup with the thing it was insurance for.
+PANEL_REMOVED_SHOPS=
 ```
 
 ⚠️ **Set `PANEL_DOMAIN_MAKER=cpanel` on the server.** With it on, the panel

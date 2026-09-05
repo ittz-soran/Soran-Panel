@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Customer;
 use App\Services\ShopControls;
+use App\Services\ShopRemover;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
@@ -42,9 +43,15 @@ class CustomerController extends Controller
         ]);
     }
 
-    public function show(Customer $customer): View
+    public function show(Customer $customer, ShopRemover $remover): View
     {
         return view('customers.show', [
+            // Section 7's rail: the reason lives on the button before the
+            // press. The screen asks the same method `remove()` asks, so a
+            // button that is enabled is one that will not be refused.
+            'removalBlocked' => $customer->trashed() ? null : $remover->blocked($customer),
+            'removedShopsGoTo' => $remover->whereRemovedShopsAreKept(),
+
             'customer' => $customer->load([
                 'latestHealthCheck',
                 'lastGoodHealthCheck',
