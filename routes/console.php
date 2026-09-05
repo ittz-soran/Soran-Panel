@@ -17,3 +17,19 @@ Schedule::command('shops:check')
     ->hourly()
     ->withoutOverlapping()
     ->runInBackground();
+
+/*
+ * The panel's own backup — PANEL_DOC Section 13.
+ *
+ * Nightly, at a quiet hour, and BEFORE the shops' own nightly work rather than
+ * after: this database is what tells you who the shops belong to, so if only
+ * one thing gets done on a struggling night it should be this one.
+ *
+ * withoutOverlapping, because a dump of a year's licences and payments on a
+ * shared host can take longer than a person expects, and two mysqldumps racing
+ * each other write two half files.
+ */
+Schedule::command('panel:backup')
+    ->dailyAt('02:30')
+    ->withoutOverlapping()
+    ->runInBackground();

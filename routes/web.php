@@ -92,6 +92,15 @@ Route::middleware('auth')->group(function () {
     // read-only: Section 8's data check reports and never repairs, and a log
     // somebody can edit is not a log.
     Route::get('health', [HealthController::class, 'index'])->name('health.index');
+
+    /*
+     * The panel's own backup — Section 13. Above {customer}, or `backup` is
+     * read as a customer, which is the same trap as `customers/new`.
+     */
+    Route::post('health/backup', [HealthController::class, 'backUp'])->name('health.backup');
+    Route::get('health/backup/{kind}/{name}', [HealthController::class, 'downloadBackup'])
+        ->name('health.backup.download');
+
     Route::post('health/{customer}', [HealthController::class, 'recheck'])->name('health.recheck');
 
     Route::get('changes', [ActionController::class, 'index'])->name('actions.index');

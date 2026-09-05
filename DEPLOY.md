@@ -513,6 +513,64 @@ account, and cPanel sometimes wants `/usr/local/bin/ea-php83`.
 
 ---
 
+## 7b. The panel's own backup
+
+The hourly check above watches the shops. Nothing watches the panel, and the
+panel's database is the one nobody else has a copy of: the customer list, every
+licence you have ever issued, and every payment. A shop's database can be
+rebuilt from its own backups. This one cannot be rebuilt from anything.
+
+The same cron line runs it — nightly at 02:30, once the scheduler is going.
+
+**Set where it goes.** In `~/panel/.env`:
+
+```
+PANEL_BACKUPS=/home/soransto/panel-backups
+PANEL_BACKUPS_OFFSITE=
+```
+
+Leaving `PANEL_BACKUPS` empty gives you the same folder by default. What it must
+never be is anywhere inside `~/panel`, which gets pulled and one day recloned —
+`panel:check` warns if you point it there.
+
+**Take one now, rather than waiting for tonight:**
+
+```bash
+cd ~/panel
+php artisan panel:backup
+php artisan panel:backup --list
+```
+
+⚠️ **`PANEL_BACKUPS_OFFSITE` empty means every copy is on the same disk as the
+database it came from.** That survives a mistake and not a dead disk, which is
+the case this exists for. Either point it at somewhere synced off the machine,
+or use **Health → Download the newest** and keep the file on your own laptop.
+The panel says so on every run until you do one of the two.
+
+### The drill
+
+An untested backup is not a backup. Do this once, now, while nothing is wrong:
+
+```bash
+php artisan panel:backup
+php artisan panel:restore --force
+php artisan migrate
+```
+
+`panel:restore` with no filename puts the newest one back. Run it on the panel
+as it stands and nothing changes — which is the point: you have now seen the
+restore work, on this machine, with these credentials.
+
+⚠️ It **replaces** the database. Everything recorded since that file was written
+is gone, so on a working panel run it straight after a backup and not hours
+later.
+
+**Check:** `php artisan panel:check` shows *The panel's own backup* in green, and
+the **Health** screen shows when it last ran with a **Download the newest**
+button.
+
+---
+
 ## 8. Your own shop, through the panel
 
 Build order step 10, and the last one. **Customers → New customer**, filled in
