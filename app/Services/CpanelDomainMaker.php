@@ -49,6 +49,23 @@ class CpanelDomainMaker implements DomainMaker
         }
     }
 
+    public function secure(string $host): ?string
+    {
+        try {
+            /*
+             * The account-wide run, because that is what cPanel offers: AutoSSL
+             * looks at every domain that has none. It is asynchronous, so a
+             * success here means "asked", not "issued".
+             */
+            $this->uapi->call('SSL', 'start_autossl_check', []);
+
+            return null;
+        } catch (Throwable $e) {
+            return "A certificate for {$host} was not requested — {$e->getMessage()} cPanel runs AutoSSL on "
+                .'its own schedule anyway, so this usually sorts itself out; SSL/TLS Status has a button if not.';
+        }
+    }
+
     public function describe(): string
     {
         return sprintf('uapi at [%s], domains pointed automatically', config('panel.cpanel.uapi'));

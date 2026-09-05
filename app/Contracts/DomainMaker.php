@@ -53,6 +53,20 @@ interface DomainMaker
     public function remove(string $host): array;
 
     /**
+     * Ask the host to get this name a certificate.
+     *
+     * Reports rather than throws, and never rolls anything back. A shop with no
+     * certificate yet is a working shop that is not reachable over https yet —
+     * a thing to finish, not a reason to destroy a database. And the usual
+     * reason it fails is the honest one: DNS was published seconds ago and has
+     * not reached the host doing the checking. cPanel's own AutoSSL run will
+     * pick it up later regardless.
+     *
+     * @return ?string what to tell the operator, or null when it went through
+     */
+    public function secure(string $host): ?string;
+
+    /**
      * What `panel:check` should say about this — and, when the panel cannot
      * point domains itself, what the operator must do by hand instead.
      */

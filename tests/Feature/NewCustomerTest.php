@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Contracts\DatabaseMaker;
+use App\Contracts\DnsMaker;
 use App\Contracts\DomainMaker;
 use App\Contracts\ShopReader;
 use App\Models\Action;
@@ -44,6 +45,15 @@ class NewCustomerTest extends TestCase
     /** @var list<string> hosts taken off again by a rollback */
     public static array $unpointed = [];
 
+    /** @var list<string> hosts a certificate was asked for */
+    public static array $secured = [];
+
+    /** @var list<array{string, string}> host and address, as published */
+    public static array $published = [];
+
+    /** @var list<string> published names withdrawn by a rollback */
+    public static array $unpublished = [];
+
     /** @var list<array{string, string}> */
     public static array $dropped = [];
 
@@ -60,6 +70,9 @@ class NewCustomerTest extends TestCase
         self::$created = [];
         self::$pointed = [];
         self::$unpointed = [];
+        self::$secured = [];
+        self::$published = [];
+        self::$unpublished = [];
         self::$dropped = [];
 
         config([
@@ -102,6 +115,40 @@ class NewCustomerTest extends TestCase
             public function remove(string $host): array
             {
                 NewCustomerTest::$unpointed[] = $host;
+
+                return [];
+            }
+
+            public function secure(string $host): ?string
+            {
+                NewCustomerTest::$secured[] = $host;
+
+                return null;
+            }
+
+            public function describe(): string
+            {
+                return 'a spy';
+            }
+
+            public function isAutomatic(): bool
+            {
+                return true;
+            }
+        });
+
+        config(['panel.dns.address' => '192.0.2.7']);
+
+        $this->swap(DnsMaker::class, new class implements DnsMaker
+        {
+            public function create(string $host, string $address): void
+            {
+                NewCustomerTest::$published[] = [$host, $address];
+            }
+
+            public function remove(string $host): array
+            {
+                NewCustomerTest::$unpublished[] = $host;
 
                 return [];
             }
@@ -480,6 +527,53 @@ class NewCustomerTest extends TestCase
 
         $this->assertSame([], self::$pointed);
         $this->assertSame([], self::$unpointed);
+    }
+
+    // ---- Publishing the name ----------------------------------------------
+
+    /**
+     * Pointing the domain and publishing the name are two different jobs at two
+     * different authorities. Doing only the first gives a correctly configured
+     * site nobody can reach — which is exactly what happened on the live
+     * account: "panel.soranstore.com's server IP address could not be found".
+     */
+    public function test_it_publishes_the_name_as_well_as_pointing_the_domain(): void
+    {
+        $this->make()->assertSessionHas('success');
+
+        $this->assertSame([['hawler.soranstore.com', '192.0.2.7']], self::$published);
+    }
+
+    /** A live address serving a half-made shop is the only wreckage strangers see. */
+    public function test_a_failure_withdraws_the_published_name(): void
+    {
+        $this->withEnvironment('MIGRATE_MUST_FAIL', function () {
+            $this->make()->assertSessionHas('warning');
+        });
+
+        $this->assertSame(['hawler.soranstore.com'], self::$unpublished);
+    }
+
+    /**
+     * Publishing a name pointing nowhere is worse than not publishing one: it
+     * looks like a shop that is broken rather than one not finished.
+     */
+    public function test_it_refuses_to_publish_without_knowing_what_to_point_at(): void
+    {
+        config(['panel.dns.address' => '']);
+
+        $this->make()->assertSessionHas('warning', fn (string $said) => str_contains($said, 'PANEL_SERVER_IP'));
+
+        $this->assertSame([], self::$published);
+        $this->assertSame(0, Customer::count());
+    }
+
+    /** A certificate is asked for once the shop is real, and never before. */
+    public function test_it_asks_for_a_certificate_for_the_new_shop(): void
+    {
+        $this->make()->assertSessionHas('success');
+
+        $this->assertSame(['hawler.soranstore.com'], self::$secured);
     }
 
     public function test_a_licence_is_required_when_that_is_how_they_start(): void

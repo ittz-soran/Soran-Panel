@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Contracts\DatabaseMaker;
+use App\Contracts\DnsMaker;
 use App\Contracts\DomainMaker;
 use App\Contracts\ShopWriter;
 use App\Models\Action;
@@ -54,6 +55,7 @@ class ShopProvisioner
     public function __construct(
         private readonly DatabaseMaker $databases,
         private readonly DomainMaker $domains,
+        private readonly DnsMaker $dns,
         private readonly LicenceDelivery $delivery,
         private readonly ShopWriter $writer,
     ) {}
@@ -93,7 +95,7 @@ class ShopProvisioner
          * empties it and leaves the folder, or that person's subdomain is left
          * pointing at nothing.
          */
-        $made = ['database' => false, 'domain' => false, 'folder' => false,
+        $made = ['database' => false, 'domain' => false, 'dns' => false, 'folder' => false,
             'document_root' => ! is_dir($paths['public'])];
         $warnings = [];
 
@@ -114,6 +116,12 @@ class ShopProvisioner
              */
             $this->domains->create($wanted['host'], $paths['public']);
             $made['domain'] = true;
+
+            // And publish the name, so the world can find the server the
+            // domain now points at. Two different authorities, two steps —
+            // doing only the first gives a correct site nobody can reach.
+            $this->publish($wanted['host']);
+            $made['dns'] = true;
 
             $this->provision($short, $paths, $wanted, $database, $user, $password);
             $made['folder'] = true;
@@ -145,6 +153,16 @@ class ShopProvisioner
                 .($left === [] ? ' Everything this made has been taken back.' : ' Left behind: '.implode(', ', $left).'.'),
                 previous: $e,
             );
+        }
+
+        /*
+         * A certificate, asked for after the shop is real and outside the
+         * rollback. It usually fails the first time — DNS was published seconds
+         * ago and has not reached whoever checks it — and that is a thing to
+         * finish, never a reason to take a working shop apart.
+         */
+        if ($problem = $this->domains->secure($wanted['host'])) {
+            $warnings[] = $problem;
         }
 
         Action::record('customer.created', $customer, [
@@ -220,6 +238,7 @@ class ShopProvisioner
         $warnings = [];
         $madeFolder = false;
         $madeDomain = false;
+        $madeDns = false;
         $madeDocumentRoot = ! is_dir($paths['public']);
 
         try {
@@ -247,6 +266,9 @@ class ShopProvisioner
             // conversion is done once in tested code.
             $this->domains->create($wanted['host'], $paths['public']);
             $madeDomain = true;
+
+            $this->publish($wanted['host']);
+            $madeDns = true;
 
             $this->provision(
                 $short, $paths, $wanted,
@@ -309,6 +331,10 @@ class ShopProvisioner
              */
             $left = [];
 
+            if ($madeDns) {
+                $left = [...$left, ...$this->dns->remove($wanted['host'])];
+            }
+
             if ($madeDomain) {
                 $left = [...$left, ...$this->domains->remove($wanted['host'])];
             }
@@ -334,6 +360,10 @@ class ShopProvisioner
             );
         }
 
+        if ($problem = $this->domains->secure($wanted['host'])) {
+            $warnings[] = $problem;
+        }
+
         Action::record('customer.taken_on', $customer, [
             'host' => $wanted['host'],
             'database' => $wanted['database'],
@@ -356,6 +386,29 @@ class ShopProvisioner
             'migrations_run' => max(0, $after - $before),
             'warnings' => $warnings,
         ];
+    }
+
+    /**
+     * Publish the name, at whatever holds the zone.
+     *
+     * The address is a setting rather than something worked out here: the panel
+     * can see plenty of IP addresses and none of them is reliably the one the
+     * account answers on — a container's own address, an outbound NAT address,
+     * whatever a DNS lookup of the panel's hostname returns through a proxy.
+     * Guessing wrongly publishes a name pointing at somebody else's server.
+     */
+    private function publish(string $host): void
+    {
+        $address = (string) config('panel.dns.address');
+
+        if ($address === '' && $this->dns->isAutomatic()) {
+            throw new RuntimeException(
+                'The panel is set to publish DNS records but PANEL_SERVER_IP is not set, so it does not know '
+                .'what to point them at. It is the account’s shared IP address, on cPanel’s home page.',
+            );
+        }
+
+        $this->dns->create($host, $address);
     }
 
     /**
@@ -670,6 +723,13 @@ class ShopProvisioner
          * into — a live address serving nothing — and taking it off before the
          * folder means there is never a moment where that is true.
          */
+        // The published name first of all: a record pointing at a shop that is
+        // being taken apart is a live address serving wreckage, and it is the
+        // only piece of this a stranger can see.
+        if ($made['dns']) {
+            $left = [...$left, ...$this->dns->remove($host)];
+        }
+
         if ($made['domain']) {
             $left = [...$left, ...$this->domains->remove($host)];
         }

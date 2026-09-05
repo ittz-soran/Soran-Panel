@@ -118,6 +118,36 @@ return [
         'driver' => env('PANEL_DOMAIN_MAKER', 'manual'),
     ],
 
+    /*
+     * Who publishes a shop's name, so the world can find it.
+     *
+     * ⚠️ Off by default, and that is a decision rather than caution. Turning it
+     * on means keeping a token on this server that can rewrite where every one
+     * of these domains points — a break-in could send the whole business
+     * somewhere else, which is a larger thing than reading the panel's
+     * database. Weigh it against thirty seconds of work per shop.
+     *
+     * If it is on, the token must be a Cloudflare SCOPED token with
+     * Zone:DNS:Edit on one zone. Never a Global API Key.
+     */
+    'dns' => [
+        'driver' => env('PANEL_DNS_MAKER', 'manual'),
+
+        // What a shop's record points at. The account's shared IP, which
+        // cPanel shows on its home page and `uapi DomainInfo` reports.
+        'address' => env('PANEL_SERVER_IP', ''),
+
+        'cloudflare' => [
+            'token' => env('PANEL_CLOUDFLARE_TOKEN', ''),
+            'zone_id' => env('PANEL_CLOUDFLARE_ZONE_ID', ''),
+
+            // Orange cloud. Section 4 wants Full (strict), which needs the
+            // origin to have a certificate first — so a brand new shop goes up
+            // unproxied unless this is turned on deliberately.
+            'proxied' => (bool) env('PANEL_CLOUDFLARE_PROXIED', false),
+        ],
+    ],
+
     'attention' => [
 
         // A licence within this many days of its end — and anything already
