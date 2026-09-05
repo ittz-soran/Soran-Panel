@@ -85,6 +85,15 @@ return [
         'shared_artisan' => env('PANEL_SHARED_ARTISAN', '/home/soransto/smart-store/artisan'),
     ],
 
+    /*
+     * Where composer is, for updating the code from the panel.
+     *
+     * A setting because the web account's PATH is rarely the shell's, and
+     * "composer: not found" from a web page is a confusing way to learn that.
+     * `~/composer.phar` is common on cPanel; so is a full path under /opt.
+     */
+    'composer' => env('PANEL_COMPOSER', 'composer'),
+
     'cpanel' => [
         'uapi' => env('PANEL_UAPI', '/usr/bin/uapi'),
         'prefix' => env('PANEL_CPANEL_PREFIX', ''),
