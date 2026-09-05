@@ -100,9 +100,11 @@ return [
 
         /*
          * The account's home folder, used to turn an absolute document root
-         * into the home-relative one cPanel's `dir` wants. Read from the
-         * environment first, because that is always right on the real account;
-         * this is the answer when there is no HOME to read.
+         * into the home-relative one cPanel's `dir` wants.
+         *
+         * Optional, and set here it wins: App\Support\HomeFolder falls back to
+         * $HOME and then to the account this process runs as. Leave it empty
+         * unless the panel runs as one user on behalf of another.
          */
         'home' => env('PANEL_CPANEL_HOME', ''),
     ],

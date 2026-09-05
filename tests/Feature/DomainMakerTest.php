@@ -27,6 +27,8 @@ class DomainMakerTest extends TestCase
     /** @var list<array{string, string, array<string, mixed>}> */
     private array $calls = [];
 
+    private string|false $realHome;
+
     private function maker(): CpanelDomainMaker
     {
         $spy = new class($this->calls) extends Uapi
@@ -49,8 +51,17 @@ class DomainMakerTest extends TestCase
     {
         parent::setUp();
 
+        $this->realHome = getenv('HOME');
+
         config(['panel.cpanel.home' => '/home/soransto']);
         putenv('HOME=/home/soransto');
+    }
+
+    protected function tearDown(): void
+    {
+        is_string($this->realHome) ? putenv('HOME='.$this->realHome) : putenv('HOME');
+
+        parent::tearDown();
     }
 
     public function test_the_document_root_is_given_relative_to_the_home_folder(): void
@@ -69,6 +80,30 @@ class DomainMakerTest extends TestCase
         );
 
         $this->assertStringNotContainsString('/home/soransto', $arguments['dir']);
+    }
+
+    /**
+     * The web-request case, and the reason this stopped working in the field:
+     * `$HOME` is set by a login shell, so under PHP-FPM there is none. The
+     * document root still has to come out relative, because the browser is
+     * where shops are actually made.
+     */
+    public function test_it_works_in_a_web_request_where_home_is_not_in_the_environment(): void
+    {
+        if (! function_exists('posix_getpwuid') || ! function_exists('posix_getuid')) {
+            $this->markTestSkipped('the posix extension is not here to ask');
+        }
+
+        config(['panel.cpanel.home' => '']);
+        putenv('HOME');
+
+        $home = rtrim((string) posix_getpwuid(posix_getuid())['dir'], '/');
+
+        $this->maker()->create('bazaar.soranstore.com', $home.'/public_html/bazaar');
+
+        [, , $arguments] = $this->calls[0];
+
+        $this->assertSame('public_html/bazaar', $arguments['dir']);
     }
 
     /** cPanel wants the label and the parent separately, not the whole host. */

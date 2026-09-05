@@ -9,6 +9,7 @@ use App\Models\Customer;
 use App\Models\HealthCheck;
 use App\Models\User;
 use App\Services\CpanelDatabaseMaker;
+use App\Support\HomeFolder;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -234,7 +235,7 @@ class PanelCheck extends Command
                 throw new \RuntimeException("cPanel’s uapi is not at [{$uapi}]");
             }
 
-            $home = rtrim((string) (getenv('HOME') ?: config('panel.cpanel.home')), '/');
+            $home = HomeFolder::find();
             $public = rtrim((string) config('panel.shops.public_root'), '/');
 
             if ($home === '') {
@@ -251,7 +252,7 @@ class PanelCheck extends Command
 
             return ['ok', $maker->describe().", document roots under [{$home}]"];
         }, $maker->isAutomatic()
-            ? 'Set PANEL_UAPI, and PANEL_CPANEL_HOME if $HOME is not readable.'
+            ? 'Set PANEL_UAPI, and PANEL_CPANEL_HOME if the home folder above is not the account’s.'
             : 'Set PANEL_DOMAIN_MAKER=cpanel on the server to have the panel point domains itself.');
     }
 
