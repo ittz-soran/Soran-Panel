@@ -77,6 +77,28 @@ class CloudflareDns implements DnsMaker
         );
     }
 
+    /**
+     * One call proves all three at once: that the token works, that the zone
+     * id is real, and that this token is allowed to touch that zone. Three
+     * settings that each look fine on their own and only fail together.
+     */
+    public function verify(): string
+    {
+        $zone = $this->ask('get', "/zones/{$this->zone()}", []);
+
+        $name = data_get($zone, 'result.name');
+
+        if (! is_string($name) || $name === '') {
+            throw new RuntimeException('Cloudflare answered, but not with a zone this token can read.');
+        }
+
+        return sprintf(
+            'Cloudflare, zone [%s], records %s',
+            $name,
+            config('panel.dns.cloudflare.proxied', true) ? 'proxied' : 'DNS only',
+        );
+    }
+
     public function isAutomatic(): bool
     {
         return true;

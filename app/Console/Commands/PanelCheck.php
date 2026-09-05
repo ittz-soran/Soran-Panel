@@ -209,7 +209,9 @@ class PanelCheck extends Command
                 throw new \RuntimeException('PANEL_CLOUDFLARE_ZONE_ID is not set');
             }
 
-            return ['ok', $maker->describe().", pointing at [{$address}]"];
+            // And ask Cloudflare, rather than only reading the settings: a
+            // wrong or expired token looks identical in a config file.
+            return ['ok', $maker->verify().", pointing at [{$address}]"];
         }, $maker->isAutomatic()
             ? 'Set PANEL_SERVER_IP, PANEL_CLOUDFLARE_TOKEN and PANEL_CLOUDFLARE_ZONE_ID.'
             : 'Set PANEL_DNS_MAKER=cloudflare to have the panel publish names itself — and read the note in '

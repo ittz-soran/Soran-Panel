@@ -44,6 +44,20 @@ interface DnsMaker
     /** What `panel:check` should say, and what to do by hand when it is manual. */
     public function describe(): string;
 
+    /**
+     * Prove it can actually do its job, and say what it found.
+     *
+     * `describe()` reads settings; this one uses them. A token that is wrong,
+     * expired, or scoped to a different zone looks identical in a config file
+     * and fails in the middle of making a customer — after a database has been
+     * created and rolled back — which is the worst moment to learn it.
+     *
+     * @return string what to show on a passing check
+     *
+     * @throws \RuntimeException with what the provider said
+     */
+    public function verify(): string;
+
     /** Whether this one actually publishes names, or only says it cannot. */
     public function isAutomatic(): bool;
 }

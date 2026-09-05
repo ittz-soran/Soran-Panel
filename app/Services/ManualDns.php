@@ -30,6 +30,11 @@ class ManualDns implements DnsMaker
         return 'not published by the panel — add each shop’s record at your DNS provider';
     }
 
+    public function verify(): string
+    {
+        return $this->describe();
+    }
+
     public function isAutomatic(): bool
     {
         return false;

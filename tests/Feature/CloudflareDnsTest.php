@@ -143,6 +143,57 @@ class CloudflareDnsTest extends TestCase
         $this->assertStringContainsString('bazaar.soranstore.com', $left[0]);
     }
 
+    // ---- Proving it before a customer needs it -----------------------------
+
+    /**
+     * One call proves the token works, the zone id is real, and the token may
+     * touch that zone — three settings that each look fine alone and only fail
+     * together, in the middle of making a customer.
+     */
+    public function test_verifying_names_the_zone_it_can_actually_reach(): void
+    {
+        Http::fake([
+            'api.cloudflare.com/*' => Http::response([
+                'success' => true,
+                'errors' => [],
+                'result' => ['id' => 'zone123456', 'name' => 'soranstore.com'],
+            ]),
+        ]);
+
+        $this->assertStringContainsString('soranstore.com', (new CloudflareDns)->verify());
+
+        Http::assertSent(fn ($request) => $request->method() === 'GET'
+            && str_ends_with($request->url(), '/zones/zone123456'));
+    }
+
+    public function test_a_token_that_does_not_work_is_found_here_and_not_later(): void
+    {
+        Http::fake([
+            'api.cloudflare.com/*' => Http::response([
+                'success' => false,
+                'errors' => [['code' => 1000, 'message' => 'Invalid API Token']],
+            ], 403),
+        ]);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('Invalid API Token');
+
+        (new CloudflareDns)->verify();
+    }
+
+    /** A token scoped to somebody else's zone answers, but not with a zone. */
+    public function test_a_token_for_the_wrong_zone_is_not_taken_as_working(): void
+    {
+        Http::fake([
+            'api.cloudflare.com/*' => Http::response(['success' => true, 'errors' => [], 'result' => []]),
+        ]);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('not with a zone this token can read');
+
+        (new CloudflareDns)->verify();
+    }
+
     public function test_the_manual_one_does_nothing_and_admits_it(): void
     {
         $manual = new ManualDns;
