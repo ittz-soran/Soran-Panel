@@ -485,6 +485,11 @@ php artisan route:cache
 php artisan view:cache
 ```
 
+⚠️ **Re-run all three after any `.env` change**, or the panel keeps reading the
+old one. `panel:setup` clears the config cache for you when it writes, so its
+answers always take effect — but it does not re-cache, so run these again
+afterwards.
+
 Do this **after** everything else works, and run all three again after any
 `.env` change. A cached config reads the old file for ever — which is the same
 trap the panel clears for a shop after delivering a licence.

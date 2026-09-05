@@ -138,6 +138,20 @@ class PanelSetup extends Command
 
         $this->write($path, $set);
 
+        /*
+         * ⚠️ A cached config reads the old file for ever.
+         *
+         * DEPLOY.md's last step is `config:cache`, so by the time anyone runs
+         * this a second time — a moved database, a changed password — the
+         * answers they just typed would be written correctly and then ignored,
+         * with `panel:check` still reporting the old value and nothing on
+         * screen to explain the disagreement.
+         *
+         * This is the same trap the panel already clears for a shop after
+         * delivering a licence. It clears it for itself here.
+         */
+        $this->callSilently('config:clear');
+
         $this->newLine();
         $this->components->info('Written to .env.');
         $this->newLine();
