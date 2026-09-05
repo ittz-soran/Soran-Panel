@@ -28,6 +28,7 @@ final class Navigation
             ['label' => 'Health',         'icon' => 'bi-graph-up',    'route' => 'health.index', 'step' => null],
             ['label' => 'Operators',      'icon' => 'bi-people',         'route' => 'operators.index', 'step' => null],
             ['label' => 'What I changed', 'icon' => 'bi-clock-history',  'route' => 'actions.index', 'step' => null],
+            ['label' => 'Updates',        'icon' => 'bi-arrow-repeat',   'route' => 'updates', 'step' => null],
         ];
     }
 }

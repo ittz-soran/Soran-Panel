@@ -10,6 +10,7 @@ use App\Http\Controllers\OperatorController;
 use App\Http\Controllers\OverviewController;
 use App\Http\Controllers\SubscriptionController;
 use App\Http\Controllers\TakeOnController;
+use App\Http\Controllers\UpdateController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -49,6 +50,14 @@ Route::middleware('auth')->group(function () {
     Route::post('customers/{customer}/storage', [CustomerController::class, 'storageLimit'])->name('customers.storage');
     Route::post('customers/{customer}/suspend', [CustomerController::class, 'suspend'])->name('customers.suspend');
     Route::post('customers/{customer}/resume', [CustomerController::class, 'resume'])->name('customers.resume');
+
+    /*
+     * What version the code is on, and taking the next one from GitHub.
+     * Section 3's one-codebase-many-shops only pays off if updating is
+     * something that actually gets done.
+     */
+    Route::get('updates', [UpdateController::class, 'index'])->name('updates');
+    Route::post('updates', [UpdateController::class, 'store'])->name('updates.store');
 
     /*
      * Who may sign in. Not under a customer, because an operator belongs to the
