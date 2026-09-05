@@ -88,6 +88,25 @@ return [
     'cpanel' => [
         'uapi' => env('PANEL_UAPI', '/usr/bin/uapi'),
         'prefix' => env('PANEL_CPANEL_PREFIX', ''),
+
+        /*
+         * The account's home folder, used to turn an absolute document root
+         * into the home-relative one cPanel's `dir` wants. Read from the
+         * environment first, because that is always right on the real account;
+         * this is the answer when there is no HOME to read.
+         */
+        'home' => env('PANEL_CPANEL_HOME', ''),
+    ],
+
+    /*
+     * Who points a domain at a shop's public folder.
+     *
+     * `cpanel` does it through UAPI as part of creating the shop. `manual`
+     * leaves it to a person and says so — the right answer on a laptop, and on
+     * any host that is not cPanel.
+     */
+    'domain_maker' => [
+        'driver' => env('PANEL_DOMAIN_MAKER', 'manual'),
     ],
 
     'attention' => [

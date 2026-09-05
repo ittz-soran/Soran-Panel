@@ -319,7 +319,16 @@ the paths, and they are only wrong if your account is not at
 PANEL_SHOPS_HOME=/home/soransto/shops
 PANEL_SHOPS_PUBLIC=/home/soransto/public_html
 PANEL_SHARED_ARTISAN=/home/soransto/smart-store/artisan
+
+# Let the panel point each shop's domain itself
+PANEL_DOMAIN_MAKER=cpanel
 ```
+
+⚠️ **Set `PANEL_DOMAIN_MAKER=cpanel` on the server.** With it on, the panel
+creates each shop's subdomain as part of making the shop, and passes the
+document root **relative to your home folder** — which is the thing that goes
+wrong when a person types it. Leave it `manual` and every shop needs step 6a
+done by hand, correctly, every time.
 
 `PANEL_CPANEL_PREFIX`, which `panel:setup` asked for, matters more than it
 looks. cPanel creates `soransto_bazaar_shop` when asked for `bazaar_shop`, and
@@ -475,7 +484,7 @@ Fill it in like this:
 |---|---|
 | Shop name | Your shop, as it should read on its own screen |
 | Short name | Lower-case letters and numbers. Becomes the folder, `<short>_shop` and `<short>_user`, and **cannot be changed later** |
-| Domain | The subdomain — create it in cPanel **first**, with Document Root `public_html/<short>` (relative to home — see step 6a) |
+| Domain | The subdomain. With `PANEL_DOMAIN_MAKER=cpanel` the panel creates it for you, correctly; otherwise make it in cPanel first with Document Root `public_html/<short>` — relative to home, see step 6a |
 | How they start | **On a free trial.** Nothing signed, nothing to paste, and it proves the whole path works before a licence is involved |
 
 Then, once it is trading:

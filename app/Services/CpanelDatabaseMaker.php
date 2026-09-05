@@ -3,9 +3,8 @@
 namespace App\Services;
 
 use App\Contracts\DatabaseMaker;
-use App\Support\ShopEnvironment;
+use App\Support\Uapi;
 use RuntimeException;
-use Symfony\Component\Process\Process;
 use Throwable;
 
 /**
@@ -15,13 +14,11 @@ use Throwable;
  * Section 4 measured `/usr/bin/uapi` answering on this account, so this is the
  * one that runs on the real server.
  *
- * ⚠️ This has not been run against a real cPanel account. Everything here is
- * written from cPanel's documented UAPI and Section 4's measurement, and its
- * tests drive a fake `uapi` that answers the way cPanel documents. The first
- * real customer created through the panel is the thing that proves it, and the
- * shape of the failure to expect is a call name or a parameter name being
- * wrong — which shows up as cPanel's own error text on the screen rather than
- * as something silent.
+ * **Proved on the real account 2026-09-05**, by creating a shop through New
+ * customer: `create_database`, `create_user` and `set_privileges_on_database`
+ * all answered, and the shop was provisioned, migrated and seeded from them.
+ * Until then this was written from cPanel's documented UAPI and Section 4's
+ * measurement, with its tests driving a fake.
  *
  * Two cPanel facts the rest of the panel must not have to know:
  *
@@ -33,7 +30,7 @@ use Throwable;
  */
 class CpanelDatabaseMaker implements DatabaseMaker
 {
-    private const TIMEOUT = 60;
+    public function __construct(private readonly Uapi $uapi = new Uapi) {}
 
     public function realName(string $wanted): string
     {
@@ -60,11 +57,11 @@ class CpanelDatabaseMaker implements DatabaseMaker
             }
         }
 
-        $this->uapi('Mysql', 'create_database', ['name' => $database]);
+        $this->uapi->call('Mysql', 'create_database', ['name' => $database]);
 
         try {
-            $this->uapi('Mysql', 'create_user', ['name' => $user, 'password' => $password]);
-            $this->uapi('Mysql', 'set_privileges_on_database', [
+            $this->uapi->call('Mysql', 'create_user', ['name' => $user, 'password' => $password]);
+            $this->uapi->call('Mysql', 'set_privileges_on_database', [
                 'user' => $user,
                 'database' => $database,
                 'privileges' => 'ALL PRIVILEGES',
@@ -87,7 +84,7 @@ class CpanelDatabaseMaker implements DatabaseMaker
             ['Mysql', 'delete_user', ['name' => $this->realName($user)], "the database user [{$user}]"],
         ] as [$module, $call, $arguments, $what]) {
             try {
-                $this->uapi($module, $call, $arguments);
+                $this->uapi->call($module, $call, $arguments);
             } catch (Throwable) {
                 $left[] = $what;
             }
@@ -102,44 +99,4 @@ class CpanelDatabaseMaker implements DatabaseMaker
      * @param  array<string, string>  $arguments
      * @return array<string, mixed>
      */
-    private function uapi(string $module, string $call, array $arguments): array
-    {
-        $command = [config('panel.cpanel.uapi', '/usr/bin/uapi'), '--output=json', $module, $call];
-
-        foreach ($arguments as $name => $value) {
-            $command[] = "{$name}={$value}";
-        }
-
-        $process = new Process($command, env: ShopEnvironment::withoutThePanel());
-        $process->setTimeout(self::TIMEOUT);
-        $process->run();
-
-        $decoded = json_decode($process->getOutput(), true);
-
-        if (! is_array($decoded)) {
-            throw new RuntimeException(sprintf(
-                'cPanel did not answer %s::%s in JSON. It said: %s',
-                $module, $call,
-                mb_substr(trim($process->getErrorOutput() ?: $process->getOutput()) ?: 'nothing at all', 0, 300),
-            ));
-        }
-
-        // UAPI reports failure inside a successful process. `errors` is null
-        // when all is well and an array of sentences when it is not, and those
-        // sentences are cPanel's own — far more use on a screen than anything
-        // this could invent.
-        $errors = data_get($decoded, 'result.errors');
-
-        if (! empty($errors)) {
-            throw new RuntimeException(sprintf(
-                'cPanel refused %s::%s — %s', $module, $call, implode(' ', (array) $errors),
-            ));
-        }
-
-        if ((int) data_get($decoded, 'result.status', 0) !== 1) {
-            throw new RuntimeException("cPanel did not carry out {$module}::{$call}, and gave no reason.");
-        }
-
-        return $decoded;
-    }
 }
