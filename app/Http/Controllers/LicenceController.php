@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Models\Customer;
 use App\Services\LicenceDelivery;
+use App\Services\LicencePayload;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
@@ -28,6 +30,41 @@ class LicenceController extends Controller
             'customer' => $customer->load('currentLicence'),
             'command' => $this->commandFor($customer),
             'paidUpTo' => $customer->paidUpTo(),
+        ]);
+    }
+
+    /**
+     * The unsigned licence, for the browser to sign.
+     *
+     * This is the whole of the panel's part in signing: it says what the
+     * licence claims, and hands over the exact bytes. What comes back is a
+     * signature made on a machine this server has no reach into.
+     *
+     * ⚠️ It returns the BODY, not a token. There is nothing secret in it — a
+     * licence's contents are shown on the shop's own screen — and it is
+     * worthless without the signature, which is the point: this endpoint
+     * cannot be used to obtain a licence, only to be told what one would say.
+     */
+    public function payload(Request $request, Customer $customer, LicencePayload $payloads): JsonResponse
+    {
+        $fields = $request->validate([
+            'months' => ['nullable', 'integer', 'min:1', 'max:120'],
+            'until' => ['nullable', 'date', 'after:today'],
+            'forever' => ['nullable', 'boolean'],
+        ]);
+
+        $payload = $payloads->for($customer, [
+            'months' => $fields['months'] ?? null,
+            'until' => $fields['until'] ?? null,
+            'forever' => $request->boolean('forever'),
+        ]);
+
+        return response()->json([
+            'body' => $payloads->encode($payloads->body($payload)),
+            'shop' => $payload['shop'],
+            'host' => $payload['host'],
+            'expires' => $payload['expires'],
+            'id' => $payload['id'],
         ]);
     }
 
