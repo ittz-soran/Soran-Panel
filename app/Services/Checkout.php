@@ -172,6 +172,25 @@ class Checkout
         return $this->run([$binary, 'install', '--no-dev', '--optimize-autoloader', '--no-interaction'], $this->path);
     }
 
+    /**
+     * Throw away everything Laravel compiled from the old code.
+     *
+     * ⚠️ Not optional, and leaving it out broke the live panel the first time
+     * this screen was used. A deployed panel runs `route:cache`, so its routes
+     * come from a compiled file — pull code that adds a route and every page
+     * dies with RouteNotFoundException, including the one you would use to put
+     * it right. The same is true of cached config and compiled views.
+     *
+     * Clearing destroys nothing: these are all rebuilt on demand. Re-caching is
+     * deliberately NOT done here — that belongs to whoever deploys, and doing
+     * it mid-update would compile whatever half-finished state the machine is
+     * in.
+     */
+    public function clearCompiledCode(): string
+    {
+        return $this->run([PHP_BINARY, $this->path.'/artisan', 'optimize:clear'], $this->path);
+    }
+
     /** @param list<string> $arguments */
     private function git(array $arguments): string
     {
