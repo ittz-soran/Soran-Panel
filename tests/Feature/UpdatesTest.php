@@ -83,6 +83,10 @@ class UpdatesTest extends TestCase
 
         $this->git(['init', '-q', '-b', 'main'], $this->origin);
         file_put_contents($this->origin.'/README.md', "one\n");
+
+        // Enough of an application for `optimize:clear` to run against, which
+        // the update does every time — see Checkout::clearCompiledCode().
+        file_put_contents($this->origin.'/artisan', "<?php\nexit(0);\n");
         $this->git(['add', '.'], $this->origin);
         $this->git(['commit', '-qm', 'The first commit'], $this->origin);
 
@@ -289,6 +293,63 @@ class UpdatesTest extends TestCase
         $this->assertSame(auth()->id(), $logged->user_id);
         $this->assertSame(1, $logged->detail['commits']);
         $this->assertNotSame($logged->detail['was'], $logged->detail['now']);
+    }
+
+    /**
+     * ⚠️ The omission that broke the live panel the first time this screen was
+     * used.
+     *
+     * A deployed panel runs `route:cache`, so its routes come from a compiled
+     * file. Pull code that adds a route, leave that file, and every page dies
+     * with RouteNotFoundException — including the one you would use to put it
+     * right.
+     */
+    public function test_updating_throws_away_the_code_compiled_from_the_old_version(): void
+    {
+        $this->commitOnOrigin('A second commit');
+
+        // An artisan that records being asked, standing in for the real one.
+        // Written straight into the checkout: this is about what the clear
+        // runs, and nothing here needs it committed.
+        file_put_contents(
+            $this->clone.'/artisan',
+            "<?php\nfile_put_contents(__DIR__.'/cleared', \$argv[1] ?? '');\nexit(0);\n",
+        );
+
+        $this->checkout()->clearCompiledCode();
+
+        $this->assertSame('optimize:clear', file_get_contents($this->clone.'/cleared'));
+    }
+
+    /**
+     * A clear that fails must not look like a failed update. The code IS
+     * updated by then, and saying otherwise sends somebody to undo it.
+     */
+    public function test_a_failed_clear_is_a_warning_and_not_a_failed_update(): void
+    {
+        // An artisan that fails, arriving WITH the update — so the pull
+        // succeeds and the clear is the only thing that goes wrong. Deleting
+        // the local one instead would dirty the tree, and the pull would
+        // refuse first, which tests something else entirely.
+        file_put_contents($this->origin.'/artisan', "<?php\nexit(1);\n");
+        $this->git(['add', '.'], $this->origin);
+        $this->git(['commit', '-qm', 'An artisan that fails'], $this->origin);
+
+        $this->swap(Updater::class, new class($this->clone) extends Updater
+        {
+            public function __construct(private readonly string $path) {}
+
+            public function checkouts(): array
+            {
+                return ['panel' => new Checkout('The panel', $this->path)];
+            }
+        });
+
+        $this->post(route('updates.store'), ['checkout' => 'panel'])
+            ->assertSessionHas('warning', fn (string $said) => str_contains($said, 'optimize:clear'));
+
+        // And it really did update.
+        $this->assertSame('An artisan that fails', $this->checkout()->state()['subject']);
     }
 
     public function test_updating_something_that_is_not_a_checkout_is_refused(): void

@@ -349,6 +349,17 @@ that unlikely rather than impossible.
 4. **Reading a shop** — the service from Section 8, with the hourly health check.
 5. **Customers, one customer, Overview** — the screens that only read. **Done 2026-09-01.** "Code version" became "schema" — see Section 9.
 6. **Renew** — paste, verify, deliver, confirm. *(Task #42)* **Done 2026-09-01.**
+   **Signing from the panel added 2026-09-05**, without breaking Section 6's
+   first line. The key is read by the BROWSER, the RSA sum is done there, and
+   only the finished licence is posted — so the private key still never reaches
+   the server, and a break-in still cannot forge anything. Uploading the key for
+   PHP to sign was considered and refused: an attacker holding the panel would
+   only have to wait for the next signing to take the key itself. The panel
+   still builds what the licence claims, because that must agree with
+   `licence:issue` exactly and a second implementation in JavaScript would be
+   free to drift. Proved in real Chromium against the shop system's own
+   verifier: `valid` on the right host, `wrong_host` on another, `invalid` with
+   one character of the signature changed.
 7. **New customer** — UAPI database creation, provision, seed, issue. **Done 2026-09-01**, along with operators, storage limits and suspend/resume. Not `install:sql` — see Section 7. **The cPanel UAPI half was proved on the real account 2026-09-05**, by creating Soran's own shop through New customer: `Mysql::create_database`, `create_user` and `set_privileges_on_database` all answered, and the shop was provisioned, migrated and seeded from them.
 8. **Subscriptions and payments.** **Done 2026-09-01**, with Health and What I changed — the two Section 9 pages this list never gave a step of their own. Also `panel:check`, which says whether a machine is set up to run the panel at all.
 9. **Deploy** — `smart-store` and `panel` on the server, `panel.soranstore.com`. **Prepared 2026-09-02:** `DEPLOY.md` is the checklist, `panel:public` writes the panel's public folder, and `panel:check` says whether the machine is ready. The steps that need the real cPanel account are marked ⚠️ and are Soran's to run.

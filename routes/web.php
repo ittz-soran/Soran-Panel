@@ -45,6 +45,11 @@ Route::middleware('auth')->group(function () {
     Route::get('customers/{customer}/renew', [LicenceController::class, 'create'])->name('customers.renew');
     Route::post('customers/{customer}/renew', [LicenceController::class, 'store'])->name('customers.renew.store');
 
+    // What a licence would say, for the browser to sign on Soran's own machine.
+    // The panel builds it; the key never comes here.
+    Route::post('customers/{customer}/renew/payload', [LicenceController::class, 'payload'])
+        ->name('customers.renew.payload');
+
     // Section 7's controls. All of them write the shop's .env, ask the shop
     // what it now thinks, and leave a record with a name on it.
     Route::post('customers/{customer}/storage', [CustomerController::class, 'storageLimit'])->name('customers.storage');

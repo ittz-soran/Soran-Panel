@@ -2,7 +2,9 @@
 
 namespace App\Services;
 
+use App\Contracts\ShopWriter;
 use App\Models\Action;
+use App\Models\Customer;
 use RuntimeException;
 
 /**
@@ -120,6 +122,35 @@ class Updater
             }
         }
 
+        /*
+         * The caches, always, and after composer so the autoloader is already
+         * right. A deployed panel caches its routes: new code with a new route
+         * and a stale route cache is a 500 on every page, from the same file
+         * that would tell you why. It broke the live panel exactly once.
+         */
+        try {
+            $checkout->clearCompiledCode();
+        } catch (RuntimeException $e) {
+            $warnings[] = 'The code is updated, but clearing the old compiled routes and config failed — '
+                ."run `php artisan optimize:clear` in [{$checkout->path}] before using it. ".$e->getMessage();
+        }
+
+        /*
+         * And every shop's, when the shared codebase moved.
+         *
+         * Section 3 gives each shop its own bootstrap/cache and compiled views,
+         * built from the shared code. Leave them after an update and a shop is
+         * running yesterday's views against today's classes — which is a broken
+         * shop for a customer, from a button pressed here.
+         *
+         * Safe in a way `migrate` is not: a cleared cache is rebuilt on the
+         * next page, and no data is touched. That is why this happens
+         * automatically and migrating does not.
+         */
+        if ($which === 'shop_system') {
+            $warnings = [...$warnings, ...$this->clearEveryShop()];
+        }
+
         $after = $checkout->state();
 
         Action::record('codebase.updated', null, [
@@ -137,6 +168,31 @@ class Updater
             'took' => count($waiting),
             'said' => array_values(array_filter($said)),
             'warnings' => $warnings,
+        ];
+    }
+
+    /**
+     * Throw away what every shop compiled from the old shared code.
+     *
+     * Resolved here rather than injected, because this is the one path that
+     * needs it and the screen's other work has nothing to do with shops.
+     *
+     * @return list<string> the shops that could not be cleared
+     */
+    private function clearEveryShop(): array
+    {
+        $writer = app(ShopWriter::class);
+        $stubborn = [];
+
+        foreach (Customer::all() as $customer) {
+            if (! $writer->clearCache($customer)) {
+                $stubborn[] = $customer->name;
+            }
+        }
+
+        return $stubborn === [] ? [] : [
+            'These shops still have the old compiled code and may not work until it is cleared: '
+            .implode(', ', $stubborn).'.',
         ];
     }
 
