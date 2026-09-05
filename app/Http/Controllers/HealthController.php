@@ -3,10 +3,14 @@
 namespace App\Http\Controllers;
 
 use App\Contracts\ShopReader;
+use App\Models\Action;
 use App\Models\Customer;
 use App\Models\HealthCheck;
+use App\Services\PanelBackup;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\View\View;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
+use Throwable;
 
 /**
  * Each shop's own report on itself, read hourly — PANEL_DOC Section 9.
@@ -23,7 +27,7 @@ use Illuminate\View\View;
  */
 class HealthController extends Controller
 {
-    public function index(): View
+    public function index(PanelBackup $backups): View
     {
         $customers = Customer::query()
             ->with(['latestHealthCheck', 'lastGoodHealthCheck'])
@@ -32,9 +36,29 @@ class HealthController extends Controller
 
         $live = $customers->filter(fn (Customer $customer) => $customer->isLive());
 
+        $newest = $backups->copies()[0] ?? null;
+
         return view('health.index', [
             'customers' => $customers,
             'lastRun' => HealthCheck::max('checked_at'),
+
+            /*
+             * The panel's own backup, on the same screen as the shops' health
+             * — Section 13. It belongs here because this is the page Soran
+             * opens to ask "is anything wrong", and a backup that stopped
+             * running two weeks ago is the most wrong thing there can be while
+             * every other number on the page is green.
+             */
+            'backup' => [
+                'at' => $backups->lastRunAt(),
+                'stale' => $backups->isStale(),
+                'name' => $newest?->getFilename(),
+                'bytes' => $newest?->getSize(),
+                'where' => $backups->where(),
+                'offsite' => $backups->offsite(),
+                'daily' => count($backups->copies('daily')),
+                'monthly' => count($backups->copies('monthly')),
+            ],
             'counts' => [
                 'live' => $live->count(),
                 'unreachable' => $live->filter(
@@ -75,5 +99,57 @@ class HealthController extends Controller
                 ? "{$customer->name} answered. This is what it says right now."
                 : "{$customer->name} could not be read: ".implode(' ', $reading->problems),
         );
+    }
+
+    /**
+     * Back the panel up now — Section 13.
+     *
+     * Not destructive, so no hold and no typed name: it writes a new file and
+     * touches nothing else. The one thing it can do wrong is take a while, and
+     * a button that is slow is better than a database nobody dumped.
+     */
+    public function backUp(PanelBackup $backups): RedirectResponse
+    {
+        try {
+            $result = $backups->run();
+        } catch (Throwable $e) {
+            return back()->with('warning', 'The panel was not backed up: '.$e->getMessage());
+        }
+
+        // Recorded because a person asked for it. The nightly run is not logged
+        // — it would be a row a night for ever in a log that exists to say who
+        // did what — and its evidence is the file itself.
+        Action::record('panel.backed_up', null, ['path' => $result['path'], 'bytes' => $result['bytes']]);
+
+        $said = 'The panel is backed up: '.basename($result['path']).'.';
+
+        return back()->with(
+            $result['warnings'] === [] ? 'success' : 'warning',
+            $result['warnings'] === [] ? $said : $said.' '.implode(' ', $result['warnings']),
+        );
+    }
+
+    /**
+     * Send a backup to whoever is signed in.
+     *
+     * ⚠️ **This is the off-machine copy, in practice.** A second folder on the
+     * same server survives a mistake and not a dead disk; a file on Soran's own
+     * laptop survives the server. So this is not a convenience.
+     *
+     * The name is taken apart and rebuilt rather than trusted: `basename` and a
+     * whitelist of the two folders the panel writes, so no `..` reaches the
+     * filesystem. This route hands over the customer list, every licence and
+     * the whole payment record, which is the single most valuable file on the
+     * account — it is behind `auth`, and it is worth the paranoia.
+     */
+    public function downloadBackup(string $kind, string $name, PanelBackup $backups): BinaryFileResponse
+    {
+        abort_unless(in_array($kind, ['daily', 'monthly'], true), 404);
+
+        $path = rtrim($backups->where(), '/').'/'.$kind.'/'.basename($name);
+
+        abort_unless(str_ends_with($path, '.sql.gz') && is_file($path), 404);
+
+        return response()->download($path);
     }
 }

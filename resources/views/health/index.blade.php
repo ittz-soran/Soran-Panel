@@ -4,6 +4,70 @@
 @section('subheading', 'What each shop says about itself, asked every hour.')
 
 @section('content')
+    {{--
+        The panel's own backup — Section 13.
+
+        Above the shops, and not below them, because it is the only thing on
+        this page that is about the panel itself. Every number below says how a
+        shop is; this one says whether there is still a record of who the shops
+        belong to.
+    --}}
+    <div class="card mb-3 {{ $backup['stale'] ? 'border-danger' : '' }}">
+        <div class="card-body d-flex flex-wrap justify-content-between align-items-start gap-3">
+            <div>
+                <h2 class="h6 mb-1">
+                    <i class="bi bi-archive me-1"></i>The panel’s own backup
+                    @if ($backup['stale'])
+                        <span class="badge text-bg-danger ms-1">needs you</span>
+                    @endif
+                </h2>
+
+                @if ($backup['at'] === null)
+                    <p class="small text-danger mb-1">
+                        <strong>The panel has never been backed up.</strong>
+                        This database is the customer list, every licence and the whole payment record —
+                        and no shop on the server can tell you any of it back.
+                    </p>
+                @else
+                    <p class="small mb-1 {{ $backup['stale'] ? 'text-danger' : 'text-secondary' }}">
+                        Last {{ $backup['at']->diffForHumans() }}
+                        ({{ $backup['bytes'] >= 1048576
+                            ? number_format($backup['bytes'] / 1048576, 1).' MB'
+                            : number_format(max($backup['bytes'] / 1024, 0.1), 1).' KB' }}),
+                        keeping {{ $backup['daily'] }} nightly and {{ $backup['monthly'] }} monthly.
+                        @if ($backup['stale'])
+                            <strong>That is too long ago — check that cron is running the scheduler.</strong>
+                        @endif
+                    </p>
+                @endif
+
+                <p class="small text-secondary mb-0">
+                    In <code>{{ $backup['where'] }}</code>, nightly at 02:30.
+                    @if ($backup['offsite'])
+                        A copy also goes to <code>{{ $backup['offsite'] }}</code>.
+                    @else
+                        <span class="text-warning-emphasis">Nothing is copied off this machine</span> —
+                        set <code>PANEL_BACKUPS_OFFSITE</code>, or download one now and keep it somewhere else.
+                    @endif
+                </p>
+            </div>
+
+            <div class="d-flex flex-wrap gap-2">
+                @if ($backup['name'])
+                    <a class="btn btn-sm btn-outline-secondary"
+                       href="{{ route('health.backup.download', ['kind' => 'daily', 'name' => $backup['name']]) }}">
+                        <i class="bi bi-download me-1"></i>Download the newest
+                    </a>
+                @endif
+
+                <form method="POST" action="{{ route('health.backup') }}" class="m-0">
+                    @csrf
+                    <button type="submit" class="btn btn-sm btn-primary">Back up now</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
     <div class="row g-3 mb-3">
         @php
             $tiles = [

@@ -95,6 +95,41 @@ return [
     ],
 
     /*
+    |---------------------------------------------------------------------------
+    | The panel's own backup
+    |---------------------------------------------------------------------------
+    |
+    | PANEL_DOC Section 13: this database holds the customer list, the licence
+    | history and the payment record, and losing it is worse than losing any one
+    | shop — no shop on the server can tell you any of it back.
+    |
+    | `path` empty means beside the panel folder, NOT inside it: `~/panel` is a
+    | git checkout that gets pulled and one day recloned, and the backups of the
+    | panel's own database must not be what goes with it.
+    |
+    | `offsite` is the second copy, and it is the one that matters on the day
+    | the disk dies. Nothing can guess it, so leaving it empty is a warning on
+    | every run rather than a silent single copy.
+    |
+    */
+
+    'backups' => [
+        'path' => env('PANEL_BACKUPS', ''),
+        'offsite' => env('PANEL_BACKUPS_OFFSITE', ''),
+
+        // A month of nights and a year of month-ends, which is what the shop
+        // system keeps for a shop's own data.
+        'keep_daily' => (int) env('PANEL_BACKUPS_KEEP_DAILY', 30),
+        'keep_monthly' => (int) env('PANEL_BACKUPS_KEEP_MONTHLY', 12),
+
+        // Only needed when cron cannot find them. A full path here is used as
+        // given, so a wrong one is reported rather than worked around.
+        'mysqldump' => env('PANEL_MYSQLDUMP', ''),
+        'mysql' => env('PANEL_MYSQL', ''),
+        'gzip' => env('PANEL_GZIP', ''),
+    ],
+
+    /*
      * Where composer is, for updating the code from the panel.
      *
      * A setting because the web account's PATH is rarely the shell's, and

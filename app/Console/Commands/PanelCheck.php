@@ -9,6 +9,7 @@ use App\Models\Customer;
 use App\Models\HealthCheck;
 use App\Models\User;
 use App\Services\CpanelDatabaseMaker;
+use App\Services\PanelBackup;
 use App\Support\HomeFolder;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
@@ -51,6 +52,7 @@ class PanelCheck extends Command
         $this->newLine();
 
         $this->itsOwnDatabase();
+        $this->itsOwnBackup();
         $this->somebodyToSignIn();
         $this->theSharedCodebase();
         $this->whereShopsGo();
@@ -93,6 +95,59 @@ class PanelCheck extends Command
 
             return ['ok', $name];
         }, 'Set DB_DATABASE, DB_USERNAME and DB_PASSWORD, then run `php artisan migrate`.');
+    }
+
+    /**
+     * The panel's own backup — Section 13.
+     *
+     * A warning rather than a fault when it has simply never run, because a
+     * panel installed ten minutes ago has not had a night yet and calling that
+     * broken teaches people to ignore the check. It goes RED when the folder
+     * cannot be written or the tool is missing, because those are the two ways
+     * a nightly backup fails silently for a month.
+     */
+    private function itsOwnBackup(): void
+    {
+        $backups = app(PanelBackup::class);
+
+        $this->check('The panel’s own backup', function () use ($backups) {
+            $where = $backups->where();
+
+            if (! is_dir($where) && ! @mkdir($where, 0750, recursive: true) && ! is_dir($where)) {
+                throw new \RuntimeException("[{$where}] cannot be created");
+            }
+
+            if (! is_writable($where)) {
+                throw new \RuntimeException("[{$where}] cannot be written to");
+            }
+
+            // Under the shops? Then it is inside nothing that removes it, but
+            // it IS inside the git checkout if it is under base_path, which is
+            // the thing that goes on a reclone.
+            if (str_starts_with(rtrim($where, '/').'/', rtrim(base_path(), '/').'/')) {
+                return ['warn', "[{$where}] is inside the panel’s own folder, which gets pulled and one day "
+                    .'recloned — the backups would go with it'];
+            }
+
+            $last = $backups->lastRunAt();
+
+            if ($last === null) {
+                return ['warn', "nothing in [{$where}] yet — run `php artisan panel:backup` once"];
+            }
+
+            if ($backups->isStale()) {
+                return ['warn', 'the newest is from '.$last->diffForHumans().'; is cron running the scheduler?'];
+            }
+
+            return [$backups->offsite() === null ? 'warn' : 'ok', sprintf(
+                '%d nightly, %d monthly, newest %s%s',
+                count($backups->copies('daily')),
+                count($backups->copies('monthly')),
+                $last->diffForHumans(),
+                $backups->offsite() === null ? ' — and no copy leaves this machine' : '',
+            )];
+        }, 'Set PANEL_BACKUPS to a folder outside ~/panel, and PANEL_BACKUPS_OFFSITE to a second one. '
+           .'This database is the customer list, the licences and the payments; no shop can tell you it back.');
     }
 
     private function somebodyToSignIn(): void
