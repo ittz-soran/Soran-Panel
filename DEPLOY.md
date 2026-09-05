@@ -459,7 +459,11 @@ Fill it in like this:
 Then, once it is trading:
 
 1. Sign in to the shop itself and check it works — it is a real install.
-2. On your own machine, run `licence:issue --host=<your subdomain>`.
+2. On your own machine, run the command the panel shows you. Open the shop in
+   the panel and press **Renew**: step 1 of that screen prints the exact line,
+   with the shop's name and host already filled in and a Copy button beside it.
+   It is `licence:issue "<name>" --host=<host> --months=1 --key=<your key>` —
+   the name is a positional argument and comes first, before the options.
 3. In the panel, **Renew**, and paste it. The panel verifies, writes, clears the
    shop's cache, and asks the shop what it now thinks. `valid` on screen means
    the whole licence path works end to end on the real host.
