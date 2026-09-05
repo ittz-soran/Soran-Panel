@@ -384,14 +384,20 @@ that unlikely rather than impossible.
 
 **Still open**
 
-- **How many databases the hosting plan allows.** One per shop, and it is now
-  the only real ceiling on how many customers fit on this account — the inode
-  limit turned out not to exist. Not readable from PHP. Soran to check
-  cPanel → **MySQL Databases**, where the heading reads something like
-  "MySQL Databases (3 / 25)", or the plan's own feature list. Worth knowing
-  before selling the next shop, not urgent before building.
+Nothing.
 
 **Settled**
+
+- **How many databases the hosting plan allows** — `Databases 4 / ∞`, read off
+  the real account on 2026-09-05. **There is no limit.** This was the last open
+  question in this document, and it was the only ceiling still thought to
+  constrain how many shops fit here.
+
+  So neither of the two limits this architecture was ever argued from actually
+  exists on this hosting: not inodes (`48,130 / ∞`, Section 13, 2026-08-31) and
+  not databases. One shop still means one database and one folder, and disk and
+  memory are still finite — but there is no counted allowance to run out of,
+  and no number to plan the next sale around.
 
 - **Where the code lives** — its own GitHub repository. See Section 10.
 - **The `sys` folder at `/home/soransto/sys`** — it was a mistake and has been

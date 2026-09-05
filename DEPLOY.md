@@ -271,10 +271,9 @@ Make one in cPanel → **MySQL Databases**: a database, a user, and the user
 granted **ALL PRIVILEGES** on it. That account needs rights over this one
 database only.
 
-⚠️ **While you are on that page, write down the number in the heading** —
-"MySQL Databases (3 / 25)". PANEL_DOC Section 13 has that as the only open
-question left: it is the real ceiling on how many customers fit on this account,
-and one shop uses one database.
+*(This account has since been read: `Databases 4 / ∞` — no limit. One shop is
+still one database, but there is no allowance to run out of. PANEL_DOC
+Section 13 records it; nothing here depends on the number any more.)*
 
 Then let the panel ask for the rest, rather than editing the file:
 
