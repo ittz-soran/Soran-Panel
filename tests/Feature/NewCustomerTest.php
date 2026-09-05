@@ -158,6 +158,11 @@ class NewCustomerTest extends TestCase
                 return 'a spy';
             }
 
+            public function verify(): string
+            {
+                return 'a spy';
+            }
+
             public function isAutomatic(): bool
             {
                 return true;
