@@ -191,6 +191,25 @@ class Checkout
         return $this->run([PHP_BINARY, $this->path.'/artisan', 'optimize:clear'], $this->path);
     }
 
+    /**
+     * Bring this application's own database up to the code that just arrived.
+     *
+     * Without it, "update from the panel" is only true until the first update
+     * that carries a migration — and then the panel breaks on a table that is
+     * not there, with no way left to put it right except a terminal, which is
+     * the thing this screen exists to avoid.
+     *
+     * ⚠️ Only ever the PANEL's own database. Customers' databases are not
+     * touched by any button here: see Updater, which reports which shops are
+     * behind rather than migrating them.
+     *
+     * @return string what artisan said, for the screen
+     */
+    public function migrate(): string
+    {
+        return $this->run([PHP_BINARY, $this->path.'/artisan', 'migrate', '--force'], $this->path);
+    }
+
     /** @param list<string> $arguments */
     private function git(array $arguments): string
     {

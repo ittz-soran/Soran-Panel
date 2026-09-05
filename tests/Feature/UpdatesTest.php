@@ -84,9 +84,12 @@ class UpdatesTest extends TestCase
         $this->git(['init', '-q', '-b', 'main'], $this->origin);
         file_put_contents($this->origin.'/README.md', "one\n");
 
-        // Enough of an application for `optimize:clear` to run against, which
-        // the update does every time — see Checkout::clearCompiledCode().
-        file_put_contents($this->origin.'/artisan', "<?php\nexit(0);\n");
+        // Enough of an application for the update to run artisan against, and
+        // it writes down every command it is given so the tests can see which.
+        file_put_contents(
+            $this->origin.'/artisan',
+            "<?php\nfile_put_contents(__DIR__.'/asked', (\$argv[1] ?? '').PHP_EOL, FILE_APPEND);\nexit(0);\n",
+        );
         $this->git(['add', '.'], $this->origin);
         $this->git(['commit', '-qm', 'The first commit'], $this->origin);
 
@@ -350,6 +353,64 @@ class UpdatesTest extends TestCase
 
         // And it really did update.
         $this->assertSame('An artisan that fails', $this->checkout()->state()['subject']);
+    }
+
+    /** @return list<string> the artisan commands the update ran */
+    private function artisanWasAsked(): array
+    {
+        $path = $this->clone.'/asked';
+
+        return is_file($path)
+            ? array_values(array_filter(array_map('trim', file($path))))
+            : [];
+    }
+
+    private function swapUpdaterFor(string $key): void
+    {
+        $this->swap(Updater::class, new class($this->clone, $key) extends Updater
+        {
+            public function __construct(private readonly string $path, private readonly string $key) {}
+
+            public function checkouts(): array
+            {
+                return [$this->key => new Checkout('A checkout', $this->path)];
+            }
+        });
+    }
+
+    /**
+     * ⚠️ Without this, "update from the panel" is only true until the first
+     * update that carries a migration — and then the panel breaks on a missing
+     * column, and the screen that would fix it is the one that just broke.
+     */
+    public function test_updating_the_panel_brings_its_own_database_with_it(): void
+    {
+        $this->commitOnOrigin('A second commit');
+
+        $this->swapUpdaterFor('panel');
+
+        $this->post(route('updates.store'), ['checkout' => 'panel'])->assertSessionHas('success');
+
+        $this->assertContains('migrate', $this->artisanWasAsked());
+        $this->assertContains('optimize:clear', $this->artisanWasAsked());
+    }
+
+    /**
+     * ⚠️ And the shop system's update must NOT. That codebase is shared, its
+     * `migrate` would run against whichever database the environment happened
+     * to point at, and customers' data is not something a button labelled
+     * "update code" gets to touch. Updater says which shops are behind instead.
+     */
+    public function test_updating_the_shop_system_migrates_nothing(): void
+    {
+        $this->commitOnOrigin('A second commit');
+
+        $this->swapUpdaterFor('shop_system');
+
+        $this->post(route('updates.store'), ['checkout' => 'shop_system'])->assertSessionHas('success');
+
+        $this->assertNotContains('migrate', $this->artisanWasAsked());
+        $this->assertContains('optimize:clear', $this->artisanWasAsked());
     }
 
     public function test_updating_something_that_is_not_a_checkout_is_refused(): void
