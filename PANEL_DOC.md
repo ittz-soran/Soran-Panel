@@ -349,14 +349,28 @@ that unlikely rather than impossible.
 4. **Reading a shop** — the service from Section 8, with the hourly health check.
 5. **Customers, one customer, Overview** — the screens that only read. **Done 2026-09-01.** "Code version" became "schema" — see Section 9.
 6. **Renew** — paste, verify, deliver, confirm. *(Task #42)* **Done 2026-09-01.**
-7. **New customer** — UAPI database creation, provision, seed, issue. **Done 2026-09-01**, along with operators, storage limits and suspend/resume. Not `install:sql` — see Section 7. ⚠️ The cPanel UAPI half has not been run against a real cPanel account; the first customer created on the server is what proves it.
+7. **New customer** — UAPI database creation, provision, seed, issue. **Done 2026-09-01**, along with operators, storage limits and suspend/resume. Not `install:sql` — see Section 7. **The cPanel UAPI half was proved on the real account 2026-09-05**, by creating Soran's own shop through New customer: `Mysql::create_database`, `create_user` and `set_privileges_on_database` all answered, and the shop was provisioned, migrated and seeded from them.
 8. **Subscriptions and payments.** **Done 2026-09-01**, with Health and What I changed — the two Section 9 pages this list never gave a step of their own. Also `panel:check`, which says whether a machine is set up to run the panel at all.
 9. **Deploy** — `smart-store` and `panel` on the server, `panel.soranstore.com`. **Prepared 2026-09-02:** `DEPLOY.md` is the checklist, `panel:public` writes the panel's public folder, and `panel:check` says whether the machine is ready. The steps that need the real cPanel account are marked ⚠️ and are Soran's to run.
-10. **Soran's own shop, created through the panel on the server.** The screen for
+10. **Soran's own shop, created through the panel on the server. Done 2026-09-05.**
+    Made from nothing on the real account — database through cPanel UAPI, folder,
+    migrations, seed — which is what proved step 7's UAPI half. The screen for
     taking on a shop whose database already exists was built for Halabja-phone and
-    is finished and tested — but **Soran no longer works for them (2026-09-02)**, so
-    step 10 is now one thing: his own shop, from nothing, on the real account. That
-    is also what proves the cPanel UAPI half of step 7.
+    is finished and tested, but **Soran no longer works for them (2026-09-02)**, so
+    that half was not needed here.
+
+    ⚠️ **cPanel's Document Root field is relative to the home folder.** Both
+    domains were created by typing the absolute path, so cPanel appended it to
+    `/home/soransto` and served each from
+    `/home/soransto/home/soransto/public_html/…` — a folder that does not exist.
+    Every request 404s, including a static `robots.txt`, which reads exactly like
+    a missing vhost or a broken server: the Domains list shows the path that was
+    typed, the files are where they should be, and nothing warns you. It cost most
+    of a night and a drafted support ticket before `uapi DomainInfo
+    single_domain_data` showed the home folder twice. Section 4 had recorded
+    cPanel "using its own path and ignoring what was typed"; this is the
+    mechanism, and DEPLOY.md now says to give the path relative to home and to
+    check it rather than trust the list.
 
 ---
 
@@ -384,14 +398,20 @@ that unlikely rather than impossible.
 
 **Still open**
 
-- **How many databases the hosting plan allows.** One per shop, and it is now
-  the only real ceiling on how many customers fit on this account — the inode
-  limit turned out not to exist. Not readable from PHP. Soran to check
-  cPanel → **MySQL Databases**, where the heading reads something like
-  "MySQL Databases (3 / 25)", or the plan's own feature list. Worth knowing
-  before selling the next shop, not urgent before building.
+Nothing.
 
 **Settled**
+
+- **How many databases the hosting plan allows** — `Databases 4 / ∞`, read off
+  the real account on 2026-09-05. **There is no limit.** This was the last open
+  question in this document, and it was the only ceiling still thought to
+  constrain how many shops fit here.
+
+  So neither of the two limits this architecture was ever argued from actually
+  exists on this hosting: not inodes (`48,130 / ∞`, Section 13, 2026-08-31) and
+  not databases. One shop still means one database and one folder, and disk and
+  memory are still finite — but there is no counted allowance to run out of,
+  and no number to plan the next sale around.
 
 - **Where the code lives** — its own GitHub repository. See Section 10.
 - **The `sys` folder at `/home/soransto/sys`** — it was a mistake and has been

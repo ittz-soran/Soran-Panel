@@ -59,10 +59,26 @@ class PanelPublic extends Command
             return self::FAILURE;
         }
 
-        // Never over the top of something that is not ours. A folder with a
-        // customer's shop in it, or somebody's website, is not a place to
-        // scatter an index.php.
-        $existing = array_diff((array) scandir($target), ['.', '..']);
+        /*
+         * Never over the top of something that is not ours. A folder with a
+         * customer's shop in it, or somebody's website, is not a place to
+         * scatter an index.php.
+         *
+         * ⚠️ But cPanel's own leavings are not somebody's website. Creating the
+         * subdomain CREATES this folder — that step has to come first, because
+         * the domain must point somewhere — and cPanel leaves `cgi-bin` in it,
+         * with Let's Encrypt later adding `.well-known`. Counted as strangers,
+         * they refused every panel that had a domain pointed at it, which is
+         * every panel; and having got past that, a folder holding only those
+         * still read as "already has a panel in it".
+         *
+         * The same mistake was made in the shop provisioner and in the shop
+         * system's own `shop:provision`. This was the third place, and the one
+         * the deploy would have hit first.
+         */
+        $cpanelsOwn = ['cgi-bin', '.well-known'];
+
+        $existing = array_diff((array) scandir($target), ['.', '..'], $cpanelsOwn);
         $ours = ['index.php', '.htaccess', 'build', 'favicon.ico', 'robots.txt'];
         $strangers = array_diff($existing, $ours);
 

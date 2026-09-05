@@ -104,6 +104,27 @@ class PanelPublicTest extends TestCase
         $this->assertFileDoesNotExist($this->target().'/index.php');
     }
 
+    /**
+     * ⚠️ The deadlock, found on a real cPanel account at the third place it
+     * lives. Creating the subdomain CREATES its document root, and that has to
+     * come first — the domain must point somewhere. cPanel leaves `cgi-bin` in
+     * the new folder and Let's Encrypt later adds `.well-known`. Counted as
+     * somebody's website, they refused every panel that had a domain pointed
+     * at it, which is every panel there can be.
+     */
+    public function test_it_writes_into_the_document_root_cpanel_made(): void
+    {
+        File::ensureDirectoryExists($this->target().'/cgi-bin');
+        File::ensureDirectoryExists($this->target().'/.well-known');
+
+        $this->artisan('panel:public', ['path' => $this->target()])->assertSuccessful();
+
+        $this->assertFileExists($this->target().'/index.php');
+
+        // And what cPanel left is still there — the subdomain still works.
+        $this->assertDirectoryExists($this->target().'/cgi-bin');
+    }
+
     public function test_it_refuses_to_write_over_itself_without_being_told(): void
     {
         $this->artisan('panel:public', ['path' => $this->target()])->assertSuccessful();

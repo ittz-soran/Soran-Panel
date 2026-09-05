@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Contracts\DatabaseMaker;
+use App\Contracts\DomainMaker;
 use App\Contracts\ShopReader;
 use App\Models\Action;
 use App\Models\Customer;
@@ -37,6 +38,12 @@ class NewCustomerTest extends TestCase
     /** @var list<array{string, string, string}> */
     public static array $created = [];
 
+    /** @var list<array{string, string}> host and document root, as the panel gave them */
+    public static array $pointed = [];
+
+    /** @var list<string> hosts taken off again by a rollback */
+    public static array $unpointed = [];
+
     /** @var list<array{string, string}> */
     public static array $dropped = [];
 
@@ -51,6 +58,8 @@ class NewCustomerTest extends TestCase
         mkdir($this->root.'/public_html', 0755, true);
 
         self::$created = [];
+        self::$pointed = [];
+        self::$unpointed = [];
         self::$dropped = [];
 
         config([
@@ -80,6 +89,31 @@ class NewCustomerTest extends TestCase
                 NewCustomerTest::$dropped[] = [$database, $user];
 
                 return [];
+            }
+        });
+
+        $this->swap(DomainMaker::class, new class implements DomainMaker
+        {
+            public function create(string $host, string $documentRoot): void
+            {
+                NewCustomerTest::$pointed[] = [$host, $documentRoot];
+            }
+
+            public function remove(string $host): array
+            {
+                NewCustomerTest::$unpointed[] = $host;
+
+                return [];
+            }
+
+            public function describe(): string
+            {
+                return 'a spy';
+            }
+
+            public function isAutomatic(): bool
+            {
+                return true;
             }
         });
 
@@ -404,6 +438,48 @@ class NewCustomerTest extends TestCase
         });
 
         $this->assertDirectoryDoesNotExist($this->root.'/public_html/hawler');
+    }
+
+    // ---- The domain -------------------------------------------------------
+
+    /**
+     * The panel points the domain itself, and passes the path it already knows.
+     *
+     * Typing that path by hand is what cost a night on the live account:
+     * cPanel's Document Root field is relative to the home folder, so an
+     * absolute path serves the domain from `/home/x/home/x/public_html/...`,
+     * which does not exist. Every request 404s, including static files, and it
+     * reads like a missing vhost. Passing it in code means the conversion
+     * happens once, where it is tested.
+     */
+    public function test_it_points_the_domain_at_the_shop(): void
+    {
+        $this->make()->assertSessionHas('success');
+
+        $this->assertSame(
+            [['hawler.soranstore.com', $this->root.'/public_html/hawler']],
+            self::$pointed,
+        );
+    }
+
+    /** The domain comes off with everything else, or it is left serving nothing. */
+    public function test_a_failure_takes_the_domain_back_off(): void
+    {
+        $this->withEnvironment('MIGRATE_MUST_FAIL', function () {
+            $this->make()->assertSessionHas('warning');
+        });
+
+        $this->assertSame(['hawler.soranstore.com'], self::$unpointed);
+        $this->assertSame(0, Customer::count());
+    }
+
+    /** Nothing is pointed at a shop that was never made. */
+    public function test_a_database_that_cannot_be_made_points_no_domain(): void
+    {
+        $this->make(['short_name' => 'refuse'])->assertSessionHas('warning');
+
+        $this->assertSame([], self::$pointed);
+        $this->assertSame([], self::$unpointed);
     }
 
     public function test_a_licence_is_required_when_that_is_how_they_start(): void

@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Contracts\DatabaseMaker;
+use App\Contracts\DomainMaker;
 use App\Models\Customer;
 use App\Models\HealthCheck;
 use App\Models\User;
@@ -52,6 +53,7 @@ class PanelCheck extends Command
         $this->theSharedCodebase();
         $this->whereShopsGo();
         $this->makingDatabases();
+        $this->pointingDomains();
         $this->theSellersKey();
         $this->theLook();
         $this->notServingItsOwnSecrets();
@@ -155,6 +157,53 @@ class PanelCheck extends Command
                 return ['ok', $path];
             }, "Set {$env} to a folder that exists and can be written to.");
         }
+    }
+
+    /**
+     * Who points a shop's domain at its folder.
+     *
+     * A warning rather than a fault when the panel does not do it: a shop
+     * without its domain pointed is finished except for one step somewhere
+     * else, and calling that broken would be wrong. But it is worth saying on
+     * every check, because the manual version is where a night went — cPanel's
+     * document root field is relative to the home folder, and an absolute path
+     * put there serves the domain from a folder that does not exist.
+     */
+    private function pointingDomains(): void
+    {
+        $maker = app(DomainMaker::class);
+
+        $this->check('Pointing a shop’s domain', function () use ($maker) {
+            if (! $maker->isAutomatic()) {
+                return ['warn', $maker->describe().' — in cPanel the Document Root is RELATIVE to your '
+                    .'home folder, so type public_html/<short>, never the full path'];
+            }
+
+            $uapi = (string) config('panel.cpanel.uapi');
+
+            if (! is_file($uapi)) {
+                throw new \RuntimeException("cPanel’s uapi is not at [{$uapi}]");
+            }
+
+            $home = rtrim((string) (getenv('HOME') ?: config('panel.cpanel.home')), '/');
+            $public = rtrim((string) config('panel.shops.public_root'), '/');
+
+            if ($home === '') {
+                throw new \RuntimeException(
+                    'the home folder is not known, and cPanel wants the document root relative to it',
+                );
+            }
+
+            if (! str_starts_with($public.'/', $home.'/')) {
+                throw new \RuntimeException(
+                    "[{$public}] is not inside [{$home}], so cPanel cannot serve a shop from it",
+                );
+            }
+
+            return ['ok', $maker->describe().", document roots under [{$home}]"];
+        }, $maker->isAutomatic()
+            ? 'Set PANEL_UAPI, and PANEL_CPANEL_HOME if $HOME is not readable.'
+            : 'Set PANEL_DOMAIN_MAKER=cpanel on the server to have the panel point domains itself.');
     }
 
     private function makingDatabases(): void

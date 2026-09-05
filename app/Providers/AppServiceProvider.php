@@ -3,12 +3,15 @@
 namespace App\Providers;
 
 use App\Contracts\DatabaseMaker;
+use App\Contracts\DomainMaker;
 use App\Contracts\ShopReader;
 use App\Contracts\ShopWriter;
 use App\Services\CpanelDatabaseMaker;
+use App\Services\CpanelDomainMaker;
 use App\Services\DirectDatabaseMaker;
 use App\Services\LocalShopReader;
 use App\Services\LocalShopWriter;
+use App\Services\ManualDomainMaker;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -32,6 +35,10 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(DatabaseMaker::class, fn () => config('panel.database_maker.driver') === 'cpanel'
             ? new CpanelDatabaseMaker
             : new DirectDatabaseMaker);
+
+        $this->app->bind(DomainMaker::class, fn () => config('panel.domain_maker.driver') === 'cpanel'
+            ? new CpanelDomainMaker
+            : new ManualDomainMaker);
     }
 
     public function boot(): void

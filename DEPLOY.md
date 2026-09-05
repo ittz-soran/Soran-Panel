@@ -265,41 +265,39 @@ cp -r ~/smart-store/public/build ~/panel/public/build
 
 ---
 
-## 3. Its database
+## 3. Its database, and everything else it must be told
 
 Make one in cPanel → **MySQL Databases**: a database, a user, and the user
 granted **ALL PRIVILEGES** on it. That account needs rights over this one
 database only.
 
-⚠️ **While you are on that page, write down the number in the heading** —
-"MySQL Databases (3 / 25)". PANEL_DOC Section 13 has that as the only open
-question left: it is the real ceiling on how many customers fit on this account,
-and one shop uses one database.
+*(This account has since been read: `Databases 4 / ∞` — no limit. One shop is
+still one database, but there is no allowance to run out of. PANEL_DOC
+Section 13 records it; nothing here depends on the number any more.)*
 
-Then in `~/panel/.env`:
-
-```
-DB_DATABASE=soransto_panel
-DB_USERNAME=soransto_panel
-DB_PASSWORD=…
-```
+Then let the panel ask for the rest, rather than editing the file:
 
 ```bash
-php artisan migrate --force
+cd ~/panel
+php artisan panel:setup
 ```
 
----
+It asks for the database, its user and its password — and **tests them before
+going on**, so a wrong one is caught while you are still looking at the cPanel
+page it came from. Then the cPanel prefix (offered from the database name you
+just gave), your name, email and a password for signing in, and the address the
+panel will answer on. Nothing is written until every answer is in.
 
-## 4. A way in
-
-```
-PANEL_ADMIN_NAME=Soran
-PANEL_ADMIN_EMAIL=you@example.com
-PANEL_ADMIN_PASSWORD=…                # at least 12 characters
-```
+⚠️ **Do not type these into `.env` by hand.** The template ships a database name
+that is a guess and wrong on every account, so `Access denied` for a name you
+never chose reads as a broken panel rather than an unedited setting. And a
+generated password often contains a backslash — in a double-quoted `.env` value
+that is an escape sequence, and an invalid one makes dotenv reject the *whole
+file*, losing every setting at once rather than just that one.
 
 ```bash
-php artisan db:seed --force
+php artisan migrate --force      # the panel’s tables
+php artisan db:seed --force      # you, so you can sign in
 ```
 
 There is **no sign-up page and no forgotten-password email** — `MAIL_MAILER` is
@@ -313,46 +311,137 @@ in, and `panel:check` will keep saying so until you do.
 
 ## 5. The rest of the settings
 
-```
-APP_ENV=production
-APP_DEBUG=false
-APP_URL=https://panel.soranstore.com
+`panel:setup` and the template between them have set most of this. These are
+the paths, and they are only wrong if your account is not at
+`/home/soransto` — step 0 told you:
 
+```
 PANEL_SHOPS_HOME=/home/soransto/shops
 PANEL_SHOPS_PUBLIC=/home/soransto/public_html
 PANEL_SHARED_ARTISAN=/home/soransto/smart-store/artisan
 
-PANEL_DATABASE_MAKER=cpanel
-PANEL_UAPI=/usr/bin/uapi
-PANEL_CPANEL_PREFIX=soransto          # cPanel prefixes every database and user
+# Let the panel point each shop's domain itself
+PANEL_DOMAIN_MAKER=cpanel
 ```
 
-`PANEL_CPANEL_PREFIX` matters more than it looks. cPanel creates
-`soransto_bazaar_shop` when asked for `bazaar_shop`, and the panel has to record
-the name the shop will really connect to — get it wrong and the panel cannot
-read that shop again.
+⚠️ **Set `PANEL_DOMAIN_MAKER=cpanel` on the server.** With it on, the panel
+creates each shop's subdomain as part of making the shop, and passes the
+document root **relative to your home folder** — which is the thing that goes
+wrong when a person types it. Leave it `manual` and every shop needs step 6a
+done by hand, correctly, every time.
+
+`PANEL_CPANEL_PREFIX`, which `panel:setup` asked for, matters more than it
+looks. cPanel creates `soransto_bazaar_shop` when asked for `bazaar_shop`, and
+the panel has to record the name the shop will really connect to — get it wrong
+and the panel cannot read that shop again.
 
 ```bash
 mkdir -p ~/shops
 php artisan panel:check
 ```
 
+⚠️ **`panel:check` is meant to be red here**, and this is the point people
+undo working settings trying to fix it. Until the shop system is installed it
+will say the shared codebase is missing, and until the compiled assets are
+copied in it will say the stylesheet is. Both are steps 1 and 2, and both are
+below. What must already be green: the panel's own database, somebody who can
+sign in, the seller's public key, and its `.env` not being on the web.
+
 ---
 
 ## 6. Where the domain points
+
+This is two separate jobs in two different places, and doing only the first is
+the trap: cPanel sets up the **web server**, Cloudflare publishes the **name**.
+Neither one does the other's half.
+
+### 6a. cPanel — the web server
 
 ```bash
 php artisan panel:public /home/soransto/public_html/panel
 ```
 
-Then in cPanel → **Subdomains**, create `panel.soranstore.com` with its document
-root at `/home/soransto/public_html/panel`.
+Then in cPanel → **Domains** → *Create A New Domain*, make
+`panel.soranstore.com` with its document root at
+`/home/soransto/public_html/panel`.
 
-⚠️ cPanel will offer its own path. Let it create the subdomain, then check that
-the document root really is that folder — Section 4 records it silently using
-its own and ignoring what was typed.
+⚠️ Newer cPanel has no separate **Subdomains** page — a subdomain of a domain
+you already own is created here, and it is the same thing. Do not go looking
+for Subdomains and conclude something is missing.
 
-DNS is Cloudflare, proxied. **SSL/TLS must be Full (strict)** — Section 4 again.
+⚠️ **The Document Root field is RELATIVE to your home folder. Type
+`public_html/panel`, not `/home/soransto/public_html/panel`.**
+
+Give it the absolute path and cPanel appends it to your home directory, so the
+domain ends up served from a folder that does not exist:
+
+```
+documentroot: /home/soransto/home/soransto/public_html/panel
+homedir:      /home/soransto
+```
+
+Nothing warns you. The Domains list shows the path you typed, the files are
+right where you put them, and every request — including a static `robots.txt` —
+returns 404 from LiteSpeed, which reads exactly like a missing vhost or a
+broken server. It cost most of a night here, and a support ticket was drafted
+for a problem that was one field.
+
+**Check it, don't trust the list:**
+
+```bash
+uapi DomainInfo single_domain_data domain=panel.soranstore.com
+```
+
+`documentroot` must contain your home folder **once**. If it appears twice,
+edit the domain and give the path relative to home.
+
+### 6b. Cloudflare — the name
+
+**The nameservers for `soranstore.com` are Cloudflare's, so cPanel's DNS zone
+is not authoritative and nothing it writes is ever published.** Adding the
+domain in cPanel gives you a working web server that no one can reach:
+
+```
+This site can’t be reached
+panel.soranstore.com’s server IP address could not be found.
+ERR_NAME_NOT_RESOLVED
+```
+
+In the Cloudflare dashboard → **DNS** → *Add record*:
+
+| Field | Value |
+|---|---|
+| Type | `CNAME` |
+| Name | `panel` |
+| Target | `soranstore.com` |
+| Proxy status | **DNS only** (grey cloud) — for now |
+
+A CNAME to the main domain rather than an A record to an IP address, so it
+follows the main domain wherever it moves and there is no address to copy
+wrongly.
+
+⚠️ **Grey cloud first, not orange.** cPanel's AutoSSL proves it owns the name
+by answering a request on it over plain HTTP, and it can only do that if the
+request reaches the server. Turn the proxy on before the certificate exists and
+the next step has nothing to validate against.
+
+**Check** — from any machine, the name now answers:
+
+```bash
+getent hosts panel.soranstore.com     # or: nslookup panel.soranstore.com
+```
+
+### 6c. The certificate, then the proxy
+
+In cPanel → **SSL/TLS Status**, tick `panel.soranstore.com` and *Run AutoSSL*.
+Wait for it to report a certificate.
+
+Only then, in Cloudflare: switch that record to **Proxied** (orange cloud), and
+under **SSL/TLS → Overview** set the mode to **Full (strict)** — Section 4.
+
+⚠️ Order matters. Full (strict) with no certificate on the origin is a
+Cloudflare **526** error, which looks like the panel is broken when the only
+thing missing is the certificate.
 
 **Check:** `https://panel.soranstore.com/login` shows the sign-in screen, and
 `https://panel.soranstore.com/.env` does **not** show a file. It should be a
@@ -395,13 +484,17 @@ Fill it in like this:
 |---|---|
 | Shop name | Your shop, as it should read on its own screen |
 | Short name | Lower-case letters and numbers. Becomes the folder, `<short>_shop` and `<short>_user`, and **cannot be changed later** |
-| Domain | The subdomain — create it in cPanel **first**, pointing at `/home/soransto/public_html/<short>` |
+| Domain | The subdomain. With `PANEL_DOMAIN_MAKER=cpanel` the panel creates it for you, correctly; otherwise make it in cPanel first with Document Root `public_html/<short>` — relative to home, see step 6a |
 | How they start | **On a free trial.** Nothing signed, nothing to paste, and it proves the whole path works before a licence is involved |
 
 Then, once it is trading:
 
 1. Sign in to the shop itself and check it works — it is a real install.
-2. On your own machine, run `licence:issue --host=<your subdomain>`.
+2. On your own machine, run the command the panel shows you. Open the shop in
+   the panel and press **Renew**: step 1 of that screen prints the exact line,
+   with the shop's name and host already filled in and a Copy button beside it.
+   It is `licence:issue "<name>" --host=<host> --months=1 --key=<your key>` —
+   the name is a positional argument and comes first, before the options.
 3. In the panel, **Renew**, and paste it. The panel verifies, writes, clears the
    shop's cache, and asks the shop what it now thinks. `valid` on screen means
    the whole licence path works end to end on the real host.
@@ -427,6 +520,11 @@ php artisan route:cache
 php artisan view:cache
 ```
 
+⚠️ **Re-run all three after any `.env` change**, or the panel keeps reading the
+old one. `panel:setup` clears the config cache for you when it writes, so its
+answers always take effect — but it does not re-cache, so run these again
+afterwards.
+
 Do this **after** everything else works, and run all three again after any
 `.env` change. A cached config reads the old file for ever — which is the same
 trap the panel clears for a shop after delivering a licence.
@@ -440,6 +538,7 @@ back.
 
 | What you see | Where to look |
 |---|---|
+| A domain 404s from LiteSpeed even for `/robots.txt` | Its document root. `uapi DomainInfo single_domain_data domain=<host>` — if the home folder appears twice, the Document Root field was given an absolute path. Step 6a. |
 | `git clone` asks for a password and then refuses it | GitHub has not accepted passwords for git since 2021. Step 0b — a token or a deploy key. |
 | Unstyled HTML | `public/build` is missing. Copy it from the shop system, then `panel:public` again. |
 | A 500 with no detail | `storage/logs/laravel.log`. `APP_DEBUG` stays off. |

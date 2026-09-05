@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Contracts\DatabaseMaker;
+use App\Contracts\DomainMaker;
 use App\Contracts\ShopWriter;
 use App\Models\Action;
 use App\Models\Customer;
@@ -52,6 +53,7 @@ class ShopProvisioner
 
     public function __construct(
         private readonly DatabaseMaker $databases,
+        private readonly DomainMaker $domains,
         private readonly LicenceDelivery $delivery,
         private readonly ShopWriter $writer,
     ) {}
@@ -82,12 +84,17 @@ class ShopProvisioner
 
         // What this run has made, in the order to undo it.
         /*
-         * `document_root` records whether THIS RUN made the public folder.
-         * Usually it did not: creating the subdomain in cPanel creates it, and
-         * that step has to come first. Rolling back must then empty it rather
-         * than remove it, or the subdomain is left pointing at nothing.
+         * `document_root` records whether the public folder was absent when
+         * this run began — in which case the run is responsible for it however
+         * it came to exist, and rolling back removes it outright.
+         *
+         * When it was already there, somebody else made it: cPanel, when the
+         * subdomain was created by hand before the customer. Rolling back then
+         * empties it and leaves the folder, or that person's subdomain is left
+         * pointing at nothing.
          */
-        $made = ['database' => false, 'folder' => false, 'document_root' => ! is_dir($paths['public'])];
+        $made = ['database' => false, 'domain' => false, 'folder' => false,
+            'document_root' => ! is_dir($paths['public'])];
         $warnings = [];
 
         try {
@@ -95,6 +102,18 @@ class ShopProvisioner
 
             $this->databases->create($database, $user, $password);
             $made['database'] = true;
+
+            /*
+             * The domain before the folder, which is the order a person has to
+             * do it in anyway: creating the subdomain creates its document
+             * root, and `shop:provision` then writes into it.
+             *
+             * The panel passes the path it already knows, so the home-relative
+             * conversion happens once, in tested code, instead of being retyped
+             * for every shop — see DomainMaker for what that cost.
+             */
+            $this->domains->create($wanted['host'], $paths['public']);
+            $made['domain'] = true;
 
             $this->provision($short, $paths, $wanted, $database, $user, $password);
             $made['folder'] = true;
@@ -119,7 +138,7 @@ class ShopProvisioner
                 'notes' => $wanted['notes'] ?? null,
             ]);
         } catch (Throwable $e) {
-            $left = $this->rollBack($made, $database, $user, $paths);
+            $left = $this->rollBack($made, $database, $user, $paths, $wanted['host']);
 
             throw new RuntimeException(
                 $e->getMessage()
@@ -200,6 +219,7 @@ class ShopProvisioner
         $paths = $this->paths($short);
         $warnings = [];
         $madeFolder = false;
+        $madeDomain = false;
         $madeDocumentRoot = ! is_dir($paths['public']);
 
         try {
@@ -221,6 +241,12 @@ class ShopProvisioner
                     $found['authenticators'],
                 ));
             }
+
+            // Their domain, pointed at the folder about to be built. Same as
+            // create(): the panel passes the path, so the home-relative
+            // conversion is done once in tested code.
+            $this->domains->create($wanted['host'], $paths['public']);
+            $madeDomain = true;
 
             $this->provision(
                 $short, $paths, $wanted,
@@ -283,10 +309,14 @@ class ShopProvisioner
              */
             $left = [];
 
+            if ($madeDomain) {
+                $left = [...$left, ...$this->domains->remove($wanted['host'])];
+            }
+
             if ($madeFolder) {
-                // Their document root, if cPanel made it, is emptied and not
-                // removed — see rollBack(). A subdomain pointing at nothing is
-                // a worse mess than the half-made folder this is clearing.
+                // Their document root, if somebody else made it, is emptied and
+                // not removed — see rollBack(). A subdomain pointing at nothing
+                // is a worse mess than the half-made folder this is clearing.
                 if (! $this->deleteFolder($paths['public'], keepTheFolderItself: ! $madeDocumentRoot)) {
                     $left[] = "the folder [{$paths['public']}]";
                 }
@@ -626,13 +656,23 @@ class ShopProvisioner
     /**
      * Undo exactly what this run made.
      *
-     * @param  array{database: bool, folder: bool}  $made
+     * @param  array{database: bool, domain: bool, folder: bool, document_root: bool}  $made
      * @param  array{home: string, public: string}  $paths
      * @return list<string> what could not be taken back
      */
-    private function rollBack(array $made, string $database, string $user, array $paths): array
+    private function rollBack(array $made, string $database, string $user, array $paths, string $host): array
     {
         $left = [];
+
+        /*
+         * The domain first. A subdomain left pointing at a folder that is about
+         * to be removed is the one piece of wreckage somebody else can walk
+         * into — a live address serving nothing — and taking it off before the
+         * folder means there is never a moment where that is true.
+         */
+        if ($made['domain']) {
+            $left = [...$left, ...$this->domains->remove($host)];
+        }
 
         if ($made['folder']) {
             // The public one first, and only its contents when cPanel made the
