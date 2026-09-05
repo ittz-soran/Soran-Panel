@@ -359,13 +359,18 @@ that unlikely rather than impossible.
     is finished and tested, but **Soran no longer works for them (2026-09-02)**, so
     that half was not needed here.
 
-    ⚠️ **The shop answers at `soranstore.com/<short>/` but not on its own
-    subdomain**, exactly as the panel does. Both domains are recorded correctly in
-    cPanel with the right document roots, and both 404 from LiteSpeed even for a
-    static file — so the vhost configuration is not being rebuilt when a domain is
-    added. That is the hosting account's problem, not the panel's: the files, PHP,
-    database and provisioning are all confirmed working through the other path.
-    With the host, 2026-09-05.
+    ⚠️ **cPanel's Document Root field is relative to the home folder.** Both
+    domains were created by typing the absolute path, so cPanel appended it to
+    `/home/soransto` and served each from
+    `/home/soransto/home/soransto/public_html/…` — a folder that does not exist.
+    Every request 404s, including a static `robots.txt`, which reads exactly like
+    a missing vhost or a broken server: the Domains list shows the path that was
+    typed, the files are where they should be, and nothing warns you. It cost most
+    of a night and a drafted support ticket before `uapi DomainInfo
+    single_domain_data` showed the home folder twice. Section 4 had recorded
+    cPanel "using its own path and ignoring what was typed"; this is the
+    mechanism, and DEPLOY.md now says to give the path relative to home and to
+    check it rather than trust the list.
 
 ---
 

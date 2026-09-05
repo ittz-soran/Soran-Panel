@@ -360,9 +360,31 @@ Then in cPanel → **Domains** → *Create A New Domain*, make
 you already own is created here, and it is the same thing. Do not go looking
 for Subdomains and conclude something is missing.
 
-⚠️ cPanel will offer its own path. Let it create the domain, then check the
-Document Root column really says that folder — Section 4 records it silently
-using its own and ignoring what was typed.
+⚠️ **The Document Root field is RELATIVE to your home folder. Type
+`public_html/panel`, not `/home/soransto/public_html/panel`.**
+
+Give it the absolute path and cPanel appends it to your home directory, so the
+domain ends up served from a folder that does not exist:
+
+```
+documentroot: /home/soransto/home/soransto/public_html/panel
+homedir:      /home/soransto
+```
+
+Nothing warns you. The Domains list shows the path you typed, the files are
+right where you put them, and every request — including a static `robots.txt` —
+returns 404 from LiteSpeed, which reads exactly like a missing vhost or a
+broken server. It cost most of a night here, and a support ticket was drafted
+for a problem that was one field.
+
+**Check it, don't trust the list:**
+
+```bash
+uapi DomainInfo single_domain_data domain=panel.soranstore.com
+```
+
+`documentroot` must contain your home folder **once**. If it appears twice,
+edit the domain and give the path relative to home.
 
 ### 6b. Cloudflare — the name
 
@@ -453,7 +475,7 @@ Fill it in like this:
 |---|---|
 | Shop name | Your shop, as it should read on its own screen |
 | Short name | Lower-case letters and numbers. Becomes the folder, `<short>_shop` and `<short>_user`, and **cannot be changed later** |
-| Domain | The subdomain — create it in cPanel **first**, pointing at `/home/soransto/public_html/<short>` |
+| Domain | The subdomain — create it in cPanel **first**, with Document Root `public_html/<short>` (relative to home — see step 6a) |
 | How they start | **On a free trial.** Nothing signed, nothing to paste, and it proves the whole path works before a licence is involved |
 
 Then, once it is trading:
@@ -507,6 +529,7 @@ back.
 
 | What you see | Where to look |
 |---|---|
+| A domain 404s from LiteSpeed even for `/robots.txt` | Its document root. `uapi DomainInfo single_domain_data domain=<host>` — if the home folder appears twice, the Document Root field was given an absolute path. Step 6a. |
 | `git clone` asks for a password and then refuses it | GitHub has not accepted passwords for git since 2021. Step 0b — a token or a deploy key. |
 | Unstyled HTML | `public/build` is missing. Copy it from the shop system, then `panel:public` again. |
 | A 500 with no detail | `storage/logs/laravel.log`. `APP_DEBUG` stays off. |
