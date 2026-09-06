@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Action;
 use App\Models\Customer;
 use App\Services\ShopControls;
 use App\Services\ShopRemover;
@@ -51,6 +52,22 @@ class CustomerController extends Controller
             // button that is enabled is one that will not be refused.
             'removalBlocked' => $customer->trashed() ? null : $remover->blocked($customer),
             'removedShopsGoTo' => $remover->whereRemovedShopsAreKept(),
+
+            /*
+             * What the removal could not finish, kept readable after the
+             * flash message has gone.
+             *
+             * It was only ever on the redirect: press the button, read the
+             * green line, click away, and the fact that a subdomain is still
+             * pointing at a deleted folder is lost — recoverable only from a
+             * JSON blob truncated to 140 characters on the log. This is the
+             * page anybody looks at to ask "what happened to that shop", so
+             * the unfinished part belongs here.
+             */
+            'leftBehind' => $customer->trashed()
+                ? (Action::where('customer_id', $customer->id)
+                    ->where('action', 'shop.removed')->latest('id')->first()?->detail['left'] ?? [])
+                : [],
 
             'customer' => $customer->load([
                 'latestHealthCheck',

@@ -97,10 +97,22 @@ class ShopRemover
         // apart is a live address serving wreckage, and it is the only piece of
         // this a stranger can see.
         $left = [...$left, ...$this->dns->remove($customer->host)];
-        $done[] = 'the DNS record was removed'.($this->dns->isAutomatic() ? '' : ' (by hand — nothing to do here)');
+        $done[] = $this->dns->isAutomatic()
+            ? 'the DNS record was removed'
+            : 'the DNS record is yours to remove — the panel does not publish names here';
 
+        /*
+         * ⚠️ Both of these say "by hand" when the panel does not do that half,
+         * and the domain line did not. It read "the subdomain … was removed" on
+         * a panel whose PANEL_DOMAIN_MAKER is `manual` and which had therefore
+         * removed nothing — a report that is not merely unhelpful but untrue,
+         * on the one screen where every other line describes something
+         * irreversible that really did happen.
+         */
         $left = [...$left, ...$this->domains->remove($customer->host)];
-        $done[] = "the subdomain {$customer->host} was removed";
+        $done[] = $this->domains->isAutomatic()
+            ? "the subdomain {$customer->host} was removed"
+            : "the subdomain {$customer->host} is yours to remove — the panel does not point domains here";
 
         // Public before private, and only after the subdomain has gone, so
         // there is never a moment where a live domain points at nothing.

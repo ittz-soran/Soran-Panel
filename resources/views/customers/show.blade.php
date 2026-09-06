@@ -417,12 +417,24 @@
         <h2 class="h6 mb-1"><i class="bi bi-trash3 me-1"></i>This shop was removed
             {{ $customer->deleted_at?->diffForHumans() }}.</h2>
         <p class="small mb-0">
-            Its folders, its subdomain, its DNS record and its database are gone. What you are reading
-            is the record: what it was, every licence it ran on, and everything it paid.
+            Its folders, its DNS record and its database are gone. What you are reading is the record:
+            what it was, every licence it ran on, and everything it paid.
             <a href="{{ route('actions.index') }}">What I changed</a> has the removal itself, with the
             backup it was dumped to first.
         </p>
     </div>
+
+    @if ($leftBehind !== [])
+        {{-- The half that did not finish, still worth doing. --}}
+        <div class="alert alert-warning">
+            <h2 class="h6 mb-1"><i class="bi bi-exclamation-triangle me-1"></i>These were left behind</h2>
+            <ul class="small mb-0 ps-3">
+                @foreach ($leftBehind as $thing)
+                    <li>{{ $thing }}</li>
+                @endforeach
+            </ul>
+        </div>
+    @endif
 @else
 <div class="card border-danger mt-3">
     <div class="card-header bg-danger-subtle text-danger-emphasis">

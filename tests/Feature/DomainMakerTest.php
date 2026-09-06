@@ -29,16 +29,25 @@ class DomainMakerTest extends TestCase
 
     private string|false $realHome;
 
+    /** Whether cPanel still has the domain after being asked to delete it. */
+    private bool $stillListed = false;
+
     private function maker(): CpanelDomainMaker
     {
-        $spy = new class($this->calls) extends Uapi
+        $spy = new class($this->calls, $this->stillListed) extends Uapi
         {
             /** @param list<array{string, string, array<string, mixed>}> $calls */
-            public function __construct(public array &$calls) {}
+            public function __construct(public array &$calls, public bool &$stillListed) {}
 
             public function call(string $module, string $function, array $arguments): array
             {
                 $this->calls[] = [$module, $function, $arguments];
+
+                // cPanel refuses to describe a domain the account does not
+                // have, which is how remove() recognises "gone".
+                if ($module === 'DomainInfo' && ! $this->stillListed) {
+                    throw new RuntimeException('cPanel refused DomainInfo::single_domain_data — no such domain');
+                }
 
                 return ['result' => ['status' => 1, 'errors' => null]];
             }
@@ -160,6 +169,39 @@ class DomainMakerTest extends TestCase
     }
 
     /**
+     * ⚠️ **The bug this found in the field.**
+     *
+     * cPanel accepted `delsubdomain`, answered status 1 with no errors, and
+     * kept the domain. A shop was removed — folders deleted, database dropped —
+     * and `hawler.soranstore.com` stayed in the Domains list pointing at a
+     * folder that no longer existed, while the panel reported the removal as
+     * complete. Everything irreversible had happened; the one part that had not
+     * was the part it said had.
+     */
+    public function test_a_domain_cpanel_accepts_deleting_and_then_keeps_is_reported(): void
+    {
+        $this->stillListed = true;
+
+        $left = $this->maker()->remove('bazaar.soranstore.com');
+
+        $this->assertCount(1, $left);
+        $this->assertStringContainsString('still lists', $left[0]);
+        $this->assertStringContainsString('cPanel → Domains', $left[0]);
+
+        // It did ask, and then it checked.
+        $this->assertSame(['SubDomain', 'delsubdomain'], array_slice($this->calls[0], 0, 2));
+        $this->assertSame(['DomainInfo', 'single_domain_data'], array_slice($this->calls[1], 0, 2));
+    }
+
+    /** And when cPanel really has taken it off, nothing is reported. */
+    public function test_a_domain_that_is_really_gone_is_not_reported(): void
+    {
+        $this->stillListed = false;
+
+        $this->assertSame([], $this->maker()->remove('bazaar.soranstore.com'));
+    }
+
+    /**
      * A rollback runs when something has already gone wrong. One that throws
      * buries the error that caused it.
      */
@@ -169,6 +211,11 @@ class DomainMakerTest extends TestCase
         {
             public function call(string $module, string $function, array $arguments): array
             {
+                // Refuses the delete, and still lists the domain afterwards.
+                if ($module === 'DomainInfo') {
+                    return ['result' => ['status' => 1, 'errors' => null]];
+                }
+
                 throw new RuntimeException('cPanel said no');
             }
         };
@@ -177,6 +224,7 @@ class DomainMakerTest extends TestCase
 
         $this->assertCount(1, $left);
         $this->assertStringContainsString('bazaar.soranstore.com', $left[0]);
+        $this->assertStringContainsString('cPanel said no', $left[0], 'cPanel’s own reason was thrown away');
     }
 
     /** On a laptop the panel points nothing, and says so rather than pretending. */

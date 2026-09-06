@@ -81,6 +81,11 @@ class RemoveShopTest extends TestCase
 
         $this->swap(DomainMaker::class, new class($asked) implements DomainMaker
         {
+            public bool $automatic = true;
+
+            /** What it could not take off, as CpanelDomainMaker reports it. */
+            public array $leaves = [];
+
             public function __construct(public array &$asked) {}
 
             public function create(string $host, string $documentRoot): void {}
@@ -89,7 +94,7 @@ class RemoveShopTest extends TestCase
             {
                 $this->asked[] = "domain:{$host}";
 
-                return [];
+                return $this->leaves;
             }
 
             public function secure(string $host): ?string
@@ -104,12 +109,14 @@ class RemoveShopTest extends TestCase
 
             public function isAutomatic(): bool
             {
-                return true;
+                return $this->automatic;
             }
         });
 
         $this->swap(DnsMaker::class, new class($asked) implements DnsMaker
         {
+            public bool $automatic = true;
+
             public function __construct(public array &$asked) {}
 
             public function create(string $host, string $address): void {}
@@ -133,7 +140,7 @@ class RemoveShopTest extends TestCase
 
             public function isAutomatic(): bool
             {
-                return true;
+                return $this->automatic;
             }
         });
     }
@@ -456,6 +463,55 @@ exit(0);
         // And everything else went anyway.
         $this->assertDirectoryDoesNotExist($customer->shop_home);
         $this->assertTrue($customer->fresh()->trashed());
+    }
+
+    /**
+     * ⚠️ The panel must not say it removed something it does not remove.
+     *
+     * The DNS line said "by hand" when the panel does not publish names, and
+     * the domain line did not — so a panel with PANEL_DOMAIN_MAKER=manual
+     * reported "the subdomain … was removed" having removed nothing, on the one
+     * screen where every other line describes something irreversible that
+     * really did happen.
+     */
+    public function test_it_does_not_claim_to_remove_a_domain_it_never_points(): void
+    {
+        $customer = $this->shop();
+
+        app(DomainMaker::class)->automatic = false;
+        app(DnsMaker::class)->automatic = false;
+
+        $result = $this->remover()->remove($customer);
+
+        $this->assertNotContains("the subdomain {$customer->host} was removed", $result['done']);
+
+        $said = implode(' | ', $result['done']);
+
+        $this->assertStringContainsString('subdomain '.$customer->host.' is yours to remove', $said);
+        $this->assertStringContainsString('DNS record is yours to remove', $said);
+    }
+
+    /**
+     * What the removal could not finish has to outlive the flash message.
+     *
+     * This is the shape of the real failure: everything irreversible happened,
+     * and a subdomain was left pointing at a folder that no longer exists. Read
+     * on the redirect and then lost — the page for the shop is where anybody
+     * goes back to ask what happened.
+     */
+    public function test_what_was_left_behind_is_still_on_the_page_afterwards(): void
+    {
+        $customer = $this->shop();
+
+        app(DomainMaker::class)->leaves = ['the domain [bazaar.soranstore.com], which cPanel still lists'];
+
+        $this->delete(route('customers.remove', $customer))
+            ->assertSessionHas('warning', fn (string $said) => str_contains($said, 'left behind'));
+
+        $this->get(route('customers.show', $customer))
+            ->assertOk()
+            ->assertSee('These were left behind')
+            ->assertSee('which cPanel still lists');
     }
 
     // --------------------------------------------------------- what survives
