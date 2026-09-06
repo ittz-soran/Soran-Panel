@@ -60,22 +60,41 @@ class CpanelDomainMaker implements DomainMaker
      */
     public function remove(string $host): array
     {
-        $said = null;
+        $said = [];
 
-        try {
-            $this->uapi->call('SubDomain', 'delsubdomain', ['domain' => $host]);
-        } catch (Throwable $e) {
-            $said = $e->getMessage();
-        }
+        /*
+         * ⚠️ **Two ways, because UAPI does not carry this one.** The first real
+         * removal came back with cPanel's own words:
+         *
+         *     The system could not find the function “delsubdomain”
+         *     in the module “SubDomain”.
+         *
+         * `addsubdomain` is in UAPI — creating shops works — and the delete was
+         * never moved across from API2. So both are tried, newest first, and
+         * cPanel is asked after each whether the domain has actually gone. It
+         * is that answer that ends the loop, not either call saying yes: a
+         * function that exists and reports success while leaving the domain in
+         * place is exactly what this method was rewritten to catch.
+         */
+        foreach ([
+            fn () => $this->uapi->call('SubDomain', 'delsubdomain', ['domain' => $host]),
+            fn () => $this->uapi->api2('SubDomain', 'delsubdomain', ['domain' => $host]),
+        ] as $try) {
+            try {
+                $try();
+            } catch (Throwable $e) {
+                $said[] = $e->getMessage();
+            }
 
-        if (! $this->stillListed($host)) {
-            return [];
+            if (! $this->stillListed($host)) {
+                return [];
+            }
         }
 
         return ['the domain ['.$host.'], which cPanel still lists'
-            .($said === null
+            .($said === []
                 ? ' even though it accepted the request to delete it'
-                : " ({$said})")
+                : ' ('.implode(' ', $said).')')
             .' — remove it in cPanel → Domains, or it points at a folder that is gone'];
     }
 

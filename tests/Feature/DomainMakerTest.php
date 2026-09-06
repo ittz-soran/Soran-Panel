@@ -32,16 +32,27 @@ class DomainMakerTest extends TestCase
     /** Whether cPanel still has the domain after being asked to delete it. */
     private bool $stillListed = false;
 
+    /** Whether this account's UAPI carries SubDomain::delsubdomain. Soran's does not. */
+    private bool $uapiHasDelete = true;
+
+    /** Whether the older API really takes the domain off. */
+    private bool $api2Removes = true;
+
     private function maker(): CpanelDomainMaker
     {
-        $spy = new class($this->calls, $this->stillListed) extends Uapi
+        $spy = new class($this->calls, $this->stillListed, $this->uapiHasDelete, $this->api2Removes) extends Uapi
         {
             /** @param list<array{string, string, array<string, mixed>}> $calls */
-            public function __construct(public array &$calls, public bool &$stillListed) {}
+            public function __construct(
+                public array &$calls,
+                public bool &$stillListed,
+                public bool &$uapiHasDelete,
+                public bool &$api2Removes,
+            ) {}
 
             public function call(string $module, string $function, array $arguments): array
             {
-                $this->calls[] = [$module, $function, $arguments];
+                $this->calls[] = ['uapi', $module, $function, $arguments];
 
                 // cPanel refuses to describe a domain the account does not
                 // have, which is how remove() recognises "gone".
@@ -49,7 +60,27 @@ class DomainMakerTest extends TestCase
                     throw new RuntimeException('cPanel refused DomainInfo::single_domain_data — no such domain');
                 }
 
+                // The real account: addsubdomain is in UAPI, delsubdomain is not.
+                if ($function === 'delsubdomain' && ! $this->uapiHasDelete) {
+                    throw new RuntimeException(
+                        'cPanel refused SubDomain::delsubdomain — The system could not find the function '
+                        .'“delsubdomain” in the module “SubDomain”.',
+                    );
+                }
+
                 return ['result' => ['status' => 1, 'errors' => null]];
+            }
+
+            public function api2(string $module, string $function, array $arguments): array
+            {
+                $this->calls[] = ['cpapi2', $module, $function, $arguments];
+
+                // API2 has it, and where it works the domain is gone afterwards.
+                if ($this->api2Removes) {
+                    $this->stillListed = false;
+                }
+
+                return ['cpanelresult' => ['event' => ['result' => 1]]];
             }
         };
 
@@ -77,7 +108,7 @@ class DomainMakerTest extends TestCase
     {
         $this->maker()->create('bazaar.soranstore.com', '/home/soransto/public_html/bazaar');
 
-        [$module, $function, $arguments] = $this->calls[0];
+        [, $module, $function, $arguments] = $this->calls[0];
 
         $this->assertSame('SubDomain', $module);
         $this->assertSame('addsubdomain', $function);
@@ -110,7 +141,7 @@ class DomainMakerTest extends TestCase
 
         $this->maker()->create('bazaar.soranstore.com', $home.'/public_html/bazaar');
 
-        [, , $arguments] = $this->calls[0];
+        [, , , $arguments] = $this->calls[0];
 
         $this->assertSame('public_html/bazaar', $arguments['dir']);
     }
@@ -120,7 +151,7 @@ class DomainMakerTest extends TestCase
     {
         $this->maker()->create('bazaar.soranstore.com', '/home/soransto/public_html/bazaar');
 
-        [, , $arguments] = $this->calls[0];
+        [, , , $arguments] = $this->calls[0];
 
         $this->assertSame('bazaar', $arguments['domain']);
         $this->assertSame('soranstore.com', $arguments['rootdomain']);
@@ -134,7 +165,7 @@ class DomainMakerTest extends TestCase
     {
         $this->maker()->create('till.bazaar.soranstore.com', '/home/soransto/public_html/till');
 
-        [, , $arguments] = $this->calls[0];
+        [, , , $arguments] = $this->calls[0];
 
         $this->assertSame('till', $arguments['domain']);
         $this->assertSame('bazaar.soranstore.com', $arguments['rootdomain']);
@@ -163,7 +194,7 @@ class DomainMakerTest extends TestCase
     {
         $this->maker()->create('bazaar.soranstore.com', '/home/soransto/public_html/bazaar');
 
-        [, , $arguments] = $this->calls[0];
+        [, , , $arguments] = $this->calls[0];
 
         $this->assertSame(1, $arguments['disallowdot']);
     }
@@ -181,6 +212,7 @@ class DomainMakerTest extends TestCase
     public function test_a_domain_cpanel_accepts_deleting_and_then_keeps_is_reported(): void
     {
         $this->stillListed = true;
+        $this->api2Removes = false;
 
         $left = $this->maker()->remove('bazaar.soranstore.com');
 
@@ -188,9 +220,45 @@ class DomainMakerTest extends TestCase
         $this->assertStringContainsString('still lists', $left[0]);
         $this->assertStringContainsString('cPanel → Domains', $left[0]);
 
-        // It did ask, and then it checked.
-        $this->assertSame(['SubDomain', 'delsubdomain'], array_slice($this->calls[0], 0, 2));
-        $this->assertSame(['DomainInfo', 'single_domain_data'], array_slice($this->calls[1], 0, 2));
+        // It asked both ways, and checked after each.
+        $this->assertSame([
+            ['uapi', 'SubDomain', 'delsubdomain'],
+            ['uapi', 'DomainInfo', 'single_domain_data'],
+            ['cpapi2', 'SubDomain', 'delsubdomain'],
+            ['uapi', 'DomainInfo', 'single_domain_data'],
+        ], array_map(fn ($call) => array_slice($call, 0, 3), $this->calls));
+    }
+
+    /**
+     * ⚠️ **Soran's account, exactly.** UAPI has `addsubdomain` and not
+     * `delsubdomain` — "The system could not find the function" — so every
+     * removal left the subdomain behind pointing at a deleted folder. cPanel
+     * kept that one in API2 and never moved it across, so the panel tries both
+     * and asks after each whether the domain has really gone.
+     */
+    public function test_a_domain_uapi_cannot_delete_is_deleted_through_api2(): void
+    {
+        $this->stillListed = true;
+        $this->uapiHasDelete = false;
+
+        $this->assertSame([], $this->maker()->remove('bazaar.soranstore.com'));
+
+        $this->assertSame([
+            ['uapi', 'SubDomain', 'delsubdomain'],
+            ['uapi', 'DomainInfo', 'single_domain_data'],
+            ['cpapi2', 'SubDomain', 'delsubdomain'],
+            ['uapi', 'DomainInfo', 'single_domain_data'],
+        ], array_map(fn ($call) => array_slice($call, 0, 3), $this->calls));
+    }
+
+    /** When UAPI can do it, API2 is never reached. */
+    public function test_the_older_api_is_only_a_fallback(): void
+    {
+        $this->stillListed = false;
+
+        $this->maker()->remove('bazaar.soranstore.com');
+
+        $this->assertNotContains('cpapi2', array_column($this->calls, 0));
     }
 
     /** And when cPanel really has taken it off, nothing is reported. */
@@ -217,6 +285,11 @@ class DomainMakerTest extends TestCase
                 }
 
                 throw new RuntimeException('cPanel said no');
+            }
+
+            public function api2(string $module, string $function, array $arguments): array
+            {
+                throw new RuntimeException('cPanel said no to that either');
             }
         };
 

@@ -643,6 +643,7 @@ back.
 
 | What you see | Where to look |
 |---|---|
+| A removed shop's domain is still in cPanel → Domains | UAPI has `SubDomain::addsubdomain` and, on some accounts, no `delsubdomain` — cPanel kept that one in API2. The panel tries both and checks afterwards, so it tells you when the domain survived. If it reports one, delete it there by hand; nothing else is left. |
 | A domain 404s from LiteSpeed even for `/robots.txt` | Its document root. `uapi DomainInfo single_domain_data domain=<host>` — if the home folder appears twice, the Document Root field was given an absolute path. Step 6a. |
 | `git clone` asks for a password and then refuses it | GitHub has not accepted passwords for git since 2021. Step 0b — a token or a deploy key. |
 | Unstyled HTML | `public/build` is missing. Copy it from the shop system, then `panel:public` again. |
