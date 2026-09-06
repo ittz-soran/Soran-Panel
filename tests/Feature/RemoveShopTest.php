@@ -154,7 +154,7 @@ class RemoveShopTest extends TestCase
         $home = $this->root.'/shops/'.$short;
         $public = $this->root.'/public_html/'.$short;
 
-        mkdir($home.'/storage/app/backups', 0755, true);
+        mkdir($home.'/storage/app/backups/daily', 0755, true);
         mkdir($public, 0755, true);
 
         file_put_contents($home.'/.env', "APP_NAME=Bazaar\n");
@@ -167,8 +167,15 @@ class RemoveShopTest extends TestCase
         if (($argv[1] ?? '') === 'backup:run') {
             if (getenv('DUMP_MUST_FAIL')) { fwrite(STDERR, 'mysqldump is not installed'); exit(1); }
             if (getenv('DUMP_MUST_VANISH')) { echo "Backed up.\n"; exit(0); }
-            file_put_contents($home.'/storage/app/backups/dump.sql', str_repeat('INSERT;', 100));
-            echo "Backed up.\n";
+
+            // Exactly where and how the real one writes: BackupService puts the
+            // file in a `daily` folder under the backups path, and BackupRun
+            // prints the full path indented, with the size after it.
+            $path = $home.'/storage/app/backups/daily/backup-2026-09-06-023000.sql.gz';
+            file_put_contents($path, str_repeat('INSERT;', 100));
+
+            echo "Backing up…\n";
+            if (! getenv('DUMP_SAYS_NOTHING')) { echo '  '.$path."  (700 B)\n"; }
             exit(0);
         }
         exit(0);
@@ -311,9 +318,75 @@ class RemoveShopTest extends TestCase
             $said = $this->refusalOf($customer);
         });
 
-        $this->assertStringContainsString('left no file', $said);
+        $this->assertStringContainsString('cannot find what it wrote', $said);
 
         $this->assertNothingWasTouched($customer);
+    }
+
+    /**
+     * ⚠️ The bug this found in the field, on the first real removal.
+     *
+     * The panel looked for the dump directly in `storage/app/backups`, and the
+     * shop system does not put it there — `BackupService::directory()` appends
+     * `daily`, so it is one level down. Every removal failed with "left no
+     * file", naming a folder that did contain the backup.
+     *
+     * The fix is not a deeper search; it is asking. `backup:run` prints the
+     * path it wrote, so the shop is now the one that says where its backup is.
+     */
+    public function test_the_dump_is_found_where_the_shop_system_really_writes_it(): void
+    {
+        $customer = $this->shop();
+
+        $result = $this->remover()->remove($customer);
+
+        $this->assertFileExists($result['backup']);
+        $this->assertStringContainsString('backup-2026-09-06-023000.sql.gz', $result['backup']);
+        $this->assertSame(700, filesize($result['backup']));
+    }
+
+    /**
+     * And the folder is not fixed either: the shop system reads
+     * `setting('backup_path')` and then `BACKUP_PATH` from the shop's own
+     * `.env`, so a shop whose backups go to an external drive would never be
+     * found by searching its own folder however deep. What it says wins.
+     */
+    public function test_a_backup_written_outside_the_shop_is_still_followed(): void
+    {
+        $customer = $this->shop();
+
+        $elsewhere = $this->root.'/an-external-drive';
+        mkdir($elsewhere, 0755, true);
+        file_put_contents($elsewhere.'/backup-elsewhere.sql.gz', str_repeat('X', 321));
+
+        // A shop whose backup:run puts it somewhere else entirely and says so.
+        file_put_contents($customer->shop_home.'/artisan', '<?php
+'
+            .'if (($argv[1] ?? "") === "backup:run") { echo "  '.$elsewhere.'/backup-elsewhere.sql.gz  (321 B)
+"; }'
+            .'
+exit(0);
+');
+
+        $result = $this->remover()->remove($customer);
+
+        $this->assertSame(321, filesize($result['backup']));
+        $this->assertStringContainsString('backup-elsewhere', $result['backup']);
+    }
+
+    /** If the output ever stops naming a path, the search still has to work. */
+    public function test_a_backup_is_still_found_when_the_shop_says_nothing_about_it(): void
+    {
+        $customer = $this->shop();
+
+        $result = ['backup' => ''];
+
+        $this->withEnvironment('DUMP_SAYS_NOTHING', function () use ($customer, &$result) {
+            $result = $this->remover()->remove($customer);
+        });
+
+        $this->assertSame(700, filesize($result['backup']),
+            'the fallback search did not look inside the daily folder');
     }
 
     /**
