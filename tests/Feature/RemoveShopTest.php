@@ -81,6 +81,11 @@ class RemoveShopTest extends TestCase
 
         $this->swap(DomainMaker::class, new class($asked) implements DomainMaker
         {
+            public bool $automatic = true;
+
+            /** What it could not take off, as CpanelDomainMaker reports it. */
+            public array $leaves = [];
+
             public function __construct(public array &$asked) {}
 
             public function create(string $host, string $documentRoot): void {}
@@ -89,7 +94,7 @@ class RemoveShopTest extends TestCase
             {
                 $this->asked[] = "domain:{$host}";
 
-                return [];
+                return $this->leaves;
             }
 
             public function secure(string $host): ?string
@@ -104,12 +109,14 @@ class RemoveShopTest extends TestCase
 
             public function isAutomatic(): bool
             {
-                return true;
+                return $this->automatic;
             }
         });
 
         $this->swap(DnsMaker::class, new class($asked) implements DnsMaker
         {
+            public bool $automatic = true;
+
             public function __construct(public array &$asked) {}
 
             public function create(string $host, string $address): void {}
@@ -133,7 +140,7 @@ class RemoveShopTest extends TestCase
 
             public function isAutomatic(): bool
             {
-                return true;
+                return $this->automatic;
             }
         });
     }
@@ -154,7 +161,7 @@ class RemoveShopTest extends TestCase
         $home = $this->root.'/shops/'.$short;
         $public = $this->root.'/public_html/'.$short;
 
-        mkdir($home.'/storage/app/backups', 0755, true);
+        mkdir($home.'/storage/app/backups/daily', 0755, true);
         mkdir($public, 0755, true);
 
         file_put_contents($home.'/.env', "APP_NAME=Bazaar\n");
@@ -167,8 +174,15 @@ class RemoveShopTest extends TestCase
         if (($argv[1] ?? '') === 'backup:run') {
             if (getenv('DUMP_MUST_FAIL')) { fwrite(STDERR, 'mysqldump is not installed'); exit(1); }
             if (getenv('DUMP_MUST_VANISH')) { echo "Backed up.\n"; exit(0); }
-            file_put_contents($home.'/storage/app/backups/dump.sql', str_repeat('INSERT;', 100));
-            echo "Backed up.\n";
+
+            // Exactly where and how the real one writes: BackupService puts the
+            // file in a `daily` folder under the backups path, and BackupRun
+            // prints the full path indented, with the size after it.
+            $path = $home.'/storage/app/backups/daily/backup-2026-09-06-023000.sql.gz';
+            file_put_contents($path, str_repeat('INSERT;', 100));
+
+            echo "Backing up…\n";
+            if (! getenv('DUMP_SAYS_NOTHING')) { echo '  '.$path."  (700 B)\n"; }
             exit(0);
         }
         exit(0);
@@ -311,9 +325,75 @@ class RemoveShopTest extends TestCase
             $said = $this->refusalOf($customer);
         });
 
-        $this->assertStringContainsString('left no file', $said);
+        $this->assertStringContainsString('cannot find what it wrote', $said);
 
         $this->assertNothingWasTouched($customer);
+    }
+
+    /**
+     * ⚠️ The bug this found in the field, on the first real removal.
+     *
+     * The panel looked for the dump directly in `storage/app/backups`, and the
+     * shop system does not put it there — `BackupService::directory()` appends
+     * `daily`, so it is one level down. Every removal failed with "left no
+     * file", naming a folder that did contain the backup.
+     *
+     * The fix is not a deeper search; it is asking. `backup:run` prints the
+     * path it wrote, so the shop is now the one that says where its backup is.
+     */
+    public function test_the_dump_is_found_where_the_shop_system_really_writes_it(): void
+    {
+        $customer = $this->shop();
+
+        $result = $this->remover()->remove($customer);
+
+        $this->assertFileExists($result['backup']);
+        $this->assertStringContainsString('backup-2026-09-06-023000.sql.gz', $result['backup']);
+        $this->assertSame(700, filesize($result['backup']));
+    }
+
+    /**
+     * And the folder is not fixed either: the shop system reads
+     * `setting('backup_path')` and then `BACKUP_PATH` from the shop's own
+     * `.env`, so a shop whose backups go to an external drive would never be
+     * found by searching its own folder however deep. What it says wins.
+     */
+    public function test_a_backup_written_outside_the_shop_is_still_followed(): void
+    {
+        $customer = $this->shop();
+
+        $elsewhere = $this->root.'/an-external-drive';
+        mkdir($elsewhere, 0755, true);
+        file_put_contents($elsewhere.'/backup-elsewhere.sql.gz', str_repeat('X', 321));
+
+        // A shop whose backup:run puts it somewhere else entirely and says so.
+        file_put_contents($customer->shop_home.'/artisan', '<?php
+'
+            .'if (($argv[1] ?? "") === "backup:run") { echo "  '.$elsewhere.'/backup-elsewhere.sql.gz  (321 B)
+"; }'
+            .'
+exit(0);
+');
+
+        $result = $this->remover()->remove($customer);
+
+        $this->assertSame(321, filesize($result['backup']));
+        $this->assertStringContainsString('backup-elsewhere', $result['backup']);
+    }
+
+    /** If the output ever stops naming a path, the search still has to work. */
+    public function test_a_backup_is_still_found_when_the_shop_says_nothing_about_it(): void
+    {
+        $customer = $this->shop();
+
+        $result = ['backup' => ''];
+
+        $this->withEnvironment('DUMP_SAYS_NOTHING', function () use ($customer, &$result) {
+            $result = $this->remover()->remove($customer);
+        });
+
+        $this->assertSame(700, filesize($result['backup']),
+            'the fallback search did not look inside the daily folder');
     }
 
     /**
@@ -383,6 +463,55 @@ class RemoveShopTest extends TestCase
         // And everything else went anyway.
         $this->assertDirectoryDoesNotExist($customer->shop_home);
         $this->assertTrue($customer->fresh()->trashed());
+    }
+
+    /**
+     * ⚠️ The panel must not say it removed something it does not remove.
+     *
+     * The DNS line said "by hand" when the panel does not publish names, and
+     * the domain line did not — so a panel with PANEL_DOMAIN_MAKER=manual
+     * reported "the subdomain … was removed" having removed nothing, on the one
+     * screen where every other line describes something irreversible that
+     * really did happen.
+     */
+    public function test_it_does_not_claim_to_remove_a_domain_it_never_points(): void
+    {
+        $customer = $this->shop();
+
+        app(DomainMaker::class)->automatic = false;
+        app(DnsMaker::class)->automatic = false;
+
+        $result = $this->remover()->remove($customer);
+
+        $this->assertNotContains("the subdomain {$customer->host} was removed", $result['done']);
+
+        $said = implode(' | ', $result['done']);
+
+        $this->assertStringContainsString('subdomain '.$customer->host.' is yours to remove', $said);
+        $this->assertStringContainsString('DNS record is yours to remove', $said);
+    }
+
+    /**
+     * What the removal could not finish has to outlive the flash message.
+     *
+     * This is the shape of the real failure: everything irreversible happened,
+     * and a subdomain was left pointing at a folder that no longer exists. Read
+     * on the redirect and then lost — the page for the shop is where anybody
+     * goes back to ask what happened.
+     */
+    public function test_what_was_left_behind_is_still_on_the_page_afterwards(): void
+    {
+        $customer = $this->shop();
+
+        app(DomainMaker::class)->leaves = ['the domain [bazaar.soranstore.com], which cPanel still lists'];
+
+        $this->delete(route('customers.remove', $customer))
+            ->assertSessionHas('warning', fn (string $said) => str_contains($said, 'left behind'));
+
+        $this->get(route('customers.show', $customer))
+            ->assertOk()
+            ->assertSee('These were left behind')
+            ->assertSee('which cPanel still lists');
     }
 
     // --------------------------------------------------------- what survives

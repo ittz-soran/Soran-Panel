@@ -39,14 +39,55 @@ class CpanelDomainMaker implements DomainMaker
         ]);
     }
 
+    /**
+     * Take the subdomain off, and then CHECK.
+     *
+     * ⚠️ **cPanel accepting `delsubdomain` is not the same as the domain being
+     * gone**, and the first version believed it was. A shop was removed — its
+     * folders deleted, its database dropped — and `hawler.soranstore.com` was
+     * still sitting in cPanel's Domains list pointing at a folder that no
+     * longer existed. The panel had reported the removal as complete.
+     *
+     * That is the worst shape a report can have: everything irreversible
+     * happened, and the one part that did not is the part it said had. So the
+     * answer comes from asking cPanel what it still has, not from what it said
+     * when asked to delete.
+     *
+     * `DomainInfo::single_domain_data` refuses to describe a domain the account
+     * does not have, which is how "gone" is recognised. If that call itself
+     * breaks for its own reasons this reads it as gone — the one case still not
+     * covered, and it is strictly narrower than trusting the delete.
+     */
     public function remove(string $host): array
     {
+        $said = null;
+
         try {
             $this->uapi->call('SubDomain', 'delsubdomain', ['domain' => $host]);
-
-            return [];
         } catch (Throwable $e) {
-            return ["the domain [{$host}] ({$e->getMessage()})"];
+            $said = $e->getMessage();
+        }
+
+        if (! $this->stillListed($host)) {
+            return [];
+        }
+
+        return ['the domain ['.$host.'], which cPanel still lists'
+            .($said === null
+                ? ' even though it accepted the request to delete it'
+                : " ({$said})")
+            .' — remove it in cPanel → Domains, or it points at a folder that is gone'];
+    }
+
+    /** Whether cPanel will still describe this domain, which means it has it. */
+    private function stillListed(string $host): bool
+    {
+        try {
+            $this->uapi->call('DomainInfo', 'single_domain_data', ['domain' => $host]);
+
+            return true;
+        } catch (Throwable) {
+            return false;
         }
     }
 

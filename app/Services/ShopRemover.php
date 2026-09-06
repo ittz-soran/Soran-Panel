@@ -97,10 +97,22 @@ class ShopRemover
         // apart is a live address serving wreckage, and it is the only piece of
         // this a stranger can see.
         $left = [...$left, ...$this->dns->remove($customer->host)];
-        $done[] = 'the DNS record was removed'.($this->dns->isAutomatic() ? '' : ' (by hand — nothing to do here)');
+        $done[] = $this->dns->isAutomatic()
+            ? 'the DNS record was removed'
+            : 'the DNS record is yours to remove — the panel does not publish names here';
 
+        /*
+         * ⚠️ Both of these say "by hand" when the panel does not do that half,
+         * and the domain line did not. It read "the subdomain … was removed" on
+         * a panel whose PANEL_DOMAIN_MAKER is `manual` and which had therefore
+         * removed nothing — a report that is not merely unhelpful but untrue,
+         * on the one screen where every other line describes something
+         * irreversible that really did happen.
+         */
         $left = [...$left, ...$this->domains->remove($customer->host)];
-        $done[] = "the subdomain {$customer->host} was removed";
+        $done[] = $this->domains->isAutomatic()
+            ? "the subdomain {$customer->host} was removed"
+            : "the subdomain {$customer->host} is yours to remove — the panel does not point domains here";
 
         // Public before private, and only after the subdomain has gone, so
         // there is never a moment where a live domain points at nothing.
@@ -186,23 +198,53 @@ class ShopRemover
             );
         }
 
-        $dump = $this->newestBackup($home);
+        $dump = $this->whereTheirBackupWent($process->getOutput(), $home);
 
         if ($dump === null) {
-            throw new RuntimeException(
-                "`backup:run` finished without error and left no file in [{$home}/storage/app/backups]. "
-                .'That is not a backup, so nothing has been removed.',
-            );
+            throw new RuntimeException(sprintf(
+                '`backup:run` finished without error and the panel cannot find what it wrote. It named no '
+                .'path, and there is nothing under [%s/storage/app/backups]. That is not a backup the panel '
+                .'can put somewhere safe, so nothing has been removed. The shop said: %s',
+                $home,
+                mb_substr(trim($process->getOutput()) ?: 'nothing at all', -300),
+            ));
         }
 
         return $this->copySomewhereThatSurvives($customer, $dump);
     }
 
-    /** The newest file the shop's own backups folder holds. */
-    private function newestBackup(string $home): ?string
+    /**
+     * Where the shop actually put its dump.
+     *
+     * ⚠️ **Asked, not guessed — and the first version guessed.** It looked for
+     * files directly in `<shop>/storage/app/backups`, and the shop system does
+     * not put them there: `BackupService::directory()` appends `daily` or
+     * `monthly`, so every real backup is one level further down. Every attempt
+     * to remove a shop failed with "left no file", pointing at a folder that
+     * did contain the backup.
+     *
+     * Guessing was wrong twice over, because that folder is not fixed either —
+     * the shop system reads `setting('backup_path')` first and `BACKUP_PATH`
+     * from the shop's own `.env` after that, so a shop whose backups go to an
+     * external drive would never have been found however deep the search went.
+     *
+     * So the path comes from `backup:run`'s own output, which prints it. The
+     * search underneath is only the fallback for the day that output changes
+     * shape, and it now looks all the way down.
+     */
+    private function whereTheirBackupWent(string $output, string $home): ?string
     {
-        $folder = $home.'/storage/app/backups';
+        // `  /home/soransto/shops/x/storage/app/backups/daily/backup-….sql.gz  (2.6 MB)`
+        if (preg_match('#(/\S+\.(?:sql|sql\.gz|gz|zip))#', $output, $said) === 1 && is_file($said[1])) {
+            return $said[1];
+        }
 
+        return $this->newestBackupUnder($home.'/storage/app/backups');
+    }
+
+    /** The newest backup anywhere under a folder, however deep. */
+    private function newestBackupUnder(string $folder): ?string
+    {
         if (! is_dir($folder)) {
             return null;
         }
@@ -210,15 +252,17 @@ class ShopRemover
         $newest = null;
         $when = -1;
 
-        foreach ((array) scandir($folder) as $entry) {
-            $path = $folder.'/'.$entry;
+        $entries = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($folder, \FilesystemIterator::SKIP_DOTS),
+        );
 
-            if ($entry === '.' || $entry === '..' || ! is_file($path)) {
+        foreach ($entries as $entry) {
+            if (! $entry->isFile()) {
                 continue;
             }
 
-            if (($at = (int) filemtime($path)) > $when) {
-                $newest = $path;
+            if (($at = (int) $entry->getMTime()) > $when) {
+                $newest = $entry->getPathname();
                 $when = $at;
             }
         }
