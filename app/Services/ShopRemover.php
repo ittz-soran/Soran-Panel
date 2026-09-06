@@ -7,10 +7,9 @@ use App\Contracts\DnsMaker;
 use App\Contracts\DomainMaker;
 use App\Models\Action;
 use App\Models\Customer;
-use App\Support\ShopEnvironment;
+use App\Support\ShopBackup;
 use App\Support\ShopFolder;
 use RuntimeException;
-use Symfony\Component\Process\Process;
 
 /**
  * Taking a shop off this server for good — PANEL_DOC Section 7.
@@ -51,9 +50,6 @@ use Symfony\Component\Process\Process;
  */
 class ShopRemover
 {
-    /** A dump of a real shop's database on a slow shared host. */
-    private const TIMEOUT = 300;
-
     public function __construct(
         private readonly DatabaseMaker $databases,
         private readonly DomainMaker $domains,
@@ -157,11 +153,6 @@ class ShopRemover
     /**
      * A dump, taken now, copied out of the way.
      *
-     * Their own tooling, for the same reason `ShopProvisioner::backUpFirst`
-     * uses it: the shop system knows how to dump itself and a restore later
-     * expects that shape. And their own artisan, because it is the one that
-     * knows which shop it is.
-     *
      * ⚠️ Copied, not moved. A `rename()` across two filesystems fails, and the
      * one moment to find that out is not while dismantling somebody's shop. The
      * original is left where it was and dies with the folder, which is fine —
@@ -174,100 +165,10 @@ class ShopRemover
      */
     private function keepACopyOfTheirDatabase(Customer $customer): string
     {
-        $home = rtrim((string) $customer->shop_home, '/');
-        $artisan = $home.'/artisan';
-
-        if (! is_file($artisan)) {
-            throw new RuntimeException(
-                "This shop has no artisan at [{$artisan}], so the panel cannot ask it for a dump — and "
-                .'without a dump nothing here will drop its database. If its folder is already gone, take it '
-                .'on again first (Take on an existing shop rebuilds the folder against the database that is '
-                .'still there), then remove it. Nothing has been touched.',
-            );
-        }
-
-        $process = new Process([PHP_BINARY, $artisan, 'backup:run'], env: ShopEnvironment::withoutThePanel());
-        $process->setTimeout(self::TIMEOUT);
-        $process->run();
-
-        if (! $process->isSuccessful()) {
-            throw new RuntimeException(
-                'Their database could not be backed up, so nothing has been removed. The shop said: '
-                .mb_substr(trim($process->getErrorOutput() ?: $process->getOutput())
-                    ?: 'nothing at all', -400),
-            );
-        }
-
-        $dump = $this->whereTheirBackupWent($process->getOutput(), $home);
-
-        if ($dump === null) {
-            throw new RuntimeException(sprintf(
-                '`backup:run` finished without error and the panel cannot find what it wrote. It named no '
-                .'path, and there is nothing under [%s/storage/app/backups]. That is not a backup the panel '
-                .'can put somewhere safe, so nothing has been removed. The shop said: %s',
-                $home,
-                mb_substr(trim($process->getOutput()) ?: 'nothing at all', -300),
-            ));
-        }
-
-        return $this->copySomewhereThatSurvives($customer, $dump);
-    }
-
-    /**
-     * Where the shop actually put its dump.
-     *
-     * ⚠️ **Asked, not guessed — and the first version guessed.** It looked for
-     * files directly in `<shop>/storage/app/backups`, and the shop system does
-     * not put them there: `BackupService::directory()` appends `daily` or
-     * `monthly`, so every real backup is one level further down. Every attempt
-     * to remove a shop failed with "left no file", pointing at a folder that
-     * did contain the backup.
-     *
-     * Guessing was wrong twice over, because that folder is not fixed either —
-     * the shop system reads `setting('backup_path')` first and `BACKUP_PATH`
-     * from the shop's own `.env` after that, so a shop whose backups go to an
-     * external drive would never have been found however deep the search went.
-     *
-     * So the path comes from `backup:run`'s own output, which prints it. The
-     * search underneath is only the fallback for the day that output changes
-     * shape, and it now looks all the way down.
-     */
-    private function whereTheirBackupWent(string $output, string $home): ?string
-    {
-        // `  /home/soransto/shops/x/storage/app/backups/daily/backup-….sql.gz  (2.6 MB)`
-        if (preg_match('#(/\S+\.(?:sql|sql\.gz|gz|zip))#', $output, $said) === 1 && is_file($said[1])) {
-            return $said[1];
-        }
-
-        return $this->newestBackupUnder($home.'/storage/app/backups');
-    }
-
-    /** The newest backup anywhere under a folder, however deep. */
-    private function newestBackupUnder(string $folder): ?string
-    {
-        if (! is_dir($folder)) {
-            return null;
-        }
-
-        $newest = null;
-        $when = -1;
-
-        $entries = new \RecursiveIteratorIterator(
-            new \RecursiveDirectoryIterator($folder, \FilesystemIterator::SKIP_DOTS),
+        return $this->copySomewhereThatSurvives(
+            $customer,
+            ShopBackup::take((string) $customer->shop_home, 'so nothing has been removed'),
         );
-
-        foreach ($entries as $entry) {
-            if (! $entry->isFile()) {
-                continue;
-            }
-
-            if (($at = (int) $entry->getMTime()) > $when) {
-                $newest = $entry->getPathname();
-                $when = $at;
-            }
-        }
-
-        return $newest;
     }
 
     /** @throws RuntimeException if the copy did not land, or landed short */

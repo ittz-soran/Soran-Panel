@@ -62,6 +62,11 @@ Route::middleware('auth')->group(function () {
     Route::post('customers/{customer}/suspend', [CustomerController::class, 'suspend'])->name('customers.suspend');
     Route::post('customers/{customer}/resume', [CustomerController::class, 'resume'])->name('customers.resume');
 
+    // Section 3's other half: one codebase updated once leaves every shop's
+    // database behind until somebody runs its migrations.
+    Route::post('customers/{customer}/migrate', [CustomerController::class, 'migrate'])
+        ->name('customers.migrate');
+
     // The one thing here that cannot be undone. Its rules are in ShopRemover.
     Route::delete('customers/{customer}', [RemoveShopController::class, 'destroy'])->name('customers.remove');
 
