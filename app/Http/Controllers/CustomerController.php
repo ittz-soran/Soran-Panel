@@ -7,9 +7,11 @@ use App\Models\Customer;
 use App\Services\ShopControls;
 use App\Services\ShopMigrator;
 use App\Services\ShopRemover;
+use App\Support\Bytes;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Throwable;
 
 /**
@@ -84,6 +86,17 @@ class CustomerController extends Controller
 
             'paidUpTo' => $customer->paidUpTo(),
 
+            /*
+             * The backups this panel has a record of taking for this shop —
+             * whether it took them on purpose, before a migration, or on the
+             * way to removing it. Each one is a download link, and a link is
+             * the only off-machine copy there is: a file on the server dies
+             * with the server.
+             */
+            'backups' => Action::where('customer_id', $customer->id)
+                ->whereIn('action', ['shop.backed_up', 'shop.migrated', 'shop.removed'])
+                ->orderByDesc('id')->limit(5)->get(),
+
             // Enough to see a trend without turning the page into a chart.
             'recentChecks' => $customer->healthChecks()
                 ->orderByDesc('checked_at')->limit(12)->get(),
@@ -126,6 +139,50 @@ class CustomerController extends Controller
         // somebody's till has just been stopped, and that is not good news even
         // when it is the intended news.
         return back()->with('warning', $result['said']);
+    }
+
+    /** Section 7: run a shop's backup, and download it. Logged. */
+    public function backUp(Customer $customer, ShopControls $controls): RedirectResponse
+    {
+        try {
+            $result = $controls->backUp($customer);
+        } catch (Throwable $e) {
+            return back()->with('warning', $e->getMessage());
+        }
+
+        return back()->with('success', sprintf(
+            '%s is backed up: %s (%s). It is on the server; use Download beside it to keep a copy off it.',
+            $customer->name,
+            basename($result['path']),
+            Bytes::human($result['bytes']),
+        ));
+    }
+
+    /**
+     * Hand over a backup this panel has a record of writing.
+     *
+     * ⚠️ **The action id, never a path.** This route sends a whole customer's
+     * database to whoever asks, so nothing the operator types reaches the
+     * filesystem: the row is looked up, it has to belong to THIS customer, and
+     * the file is whatever that row says the panel wrote. A shop's backup
+     * folder is not a fixed place either — the shop system reads
+     * `setting('backup_path')` and then `BACKUP_PATH` from the shop's own
+     * `.env` — so there is no folder to whitelist even if that were wise.
+     */
+    public function downloadBackup(Customer $customer, Action $action): BinaryFileResponse
+    {
+        abort_unless($action->customer_id === $customer->id, 404);
+
+        // Taking one on, migrating one and removing one each keep a backup too,
+        // under their own key. The one worth most is a migration's: it is the
+        // copy from the minute before the schema changed.
+        $path = $action->detail['path'] ?? $action->detail['backup'] ?? null;
+
+        // Backups are pruned by the shop's own retention — 30 daily — so a row
+        // from two months ago names a file that is legitimately gone.
+        abort_unless(is_string($path) && is_file($path), 404);
+
+        return response()->download($path);
     }
 
     /**

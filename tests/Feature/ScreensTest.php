@@ -318,10 +318,15 @@ class ScreensTest extends TestCase
     }
 
     /**
-     * Section 7's guard rail: the reason on the disabled button, not discovered
-     * after pressing it. Nothing here may write yet.
+     * Every one of Section 7's actions, and no "Not built yet" left.
+     *
+     * This test used to assert the opposite half — that the last two were
+     * disabled with the reason on the button, which was Section 7's guard rail
+     * doing its job while they were unwritten. Both are built now, so what it
+     * holds is that the list is complete: if Section 7 grows a row the screen
+     * does not, this is where it shows.
      */
-    public function test_the_danger_zone_names_what_is_coming_and_disables_it(): void
+    public function test_the_danger_zone_offers_everything_section_7_allows(): void
     {
         $customer = Customer::factory()->create();
 
@@ -330,9 +335,12 @@ class ScreensTest extends TestCase
             ->assertSee('Danger zone')
             ->assertSee('Renew the licence')
             ->assertSee('Renew…', false)
+            ->assertSee('Change the storage limit')
             ->assertSee('Suspend this shop')
             ->assertSee('Run this shop’s migrations', false)
-            ->assertSee('Not built yet')
+            ->assertSee('Run a backup, and download it')
+            ->assertSee('Remove this shop')
+            ->assertDontSee('Not built yet')
             ->assertSee('may never write to this shop’s business tables', false);
     }
 
