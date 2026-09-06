@@ -514,21 +514,45 @@
             @endif
         </li>
 
-        @foreach ([
-            ['Run this shop’s migrations', 'A backup is taken first. Hold to confirm.', 'build order step 7'],
-            ['Run a backup, and download it', 'Logged.', 'build order step 7'],
-        ] as [$label, $what, $step])
-            <li class="list-group-item d-flex flex-wrap justify-content-between align-items-center gap-2">
-                <span>
-                    <span class="d-block">{{ $label }}</span>
-                    <small class="text-secondary">{{ $what }}</small>
-                </span>
-                <button type="button" class="btn btn-sm btn-outline-danger" disabled
-                        title="Not built yet — {{ $step }}">
-                    Not built yet
-                </button>
-            </li>
-        @endforeach
+        {{--
+            Section 3's other half. Updating the shared code once is the whole
+            point of one codebase; every shop's database is behind until this
+            is run for it, and until now there was nothing to press.
+        --}}
+        @php($behind = $check?->migrationsPending())
+        <li class="list-group-item d-flex flex-wrap justify-content-between align-items-start gap-2">
+            <span>
+                <span class="d-block">Run this shop’s migrations</span>
+                <small class="text-secondary">
+                    Their own <code>migrate</code>, through their own artisan — the panel writes nothing to
+                    their tables. A backup is taken first, and if it fails nothing runs.
+                    @if ($behind === null)
+                        The last check could not count them, so this may have nothing to do.
+                    @elseif ($behind > 0)
+                        <strong>{{ $behind }} {{ Str::plural('migration', $behind) }} pending</strong>
+                        as of the last check.
+                    @else
+                        Up to date as of the last check.
+                    @endif
+                </small>
+            </span>
+
+            <x-danger-form
+                :action="route('customers.migrate', $customer)"
+                :label="$behind > 0 ? 'Run '.$behind.' '.Str::plural('migration', $behind) : 'Run them anyway'"
+                variant="warning" />
+        </li>
+
+        <li class="list-group-item d-flex flex-wrap justify-content-between align-items-center gap-2">
+            <span>
+                <span class="d-block">Run a backup, and download it</span>
+                <small class="text-secondary">Logged.</small>
+            </span>
+            <button type="button" class="btn btn-sm btn-outline-danger" disabled
+                    title="Not built yet — Section 7">
+                Not built yet
+            </button>
+        </li>
 
         {{--
             The one thing on this page that nothing can undo.

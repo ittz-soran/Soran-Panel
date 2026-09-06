@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Action;
 use App\Models\Customer;
 use App\Services\ShopControls;
+use App\Services\ShopMigrator;
 use App\Services\ShopRemover;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -125,6 +126,25 @@ class CustomerController extends Controller
         // somebody's till has just been stopped, and that is not good news even
         // when it is the intended news.
         return back()->with('warning', $result['said']);
+    }
+
+    /**
+     * Section 7: hold to confirm, backup taken first.
+     *
+     * No typed shop name, unlike suspending and removing. Those two stop a
+     * shop or end it; this one brings its database up to date with the code it
+     * is already running, and the pending count is on the button before the
+     * press. A rail that is everywhere is a rail nobody reads.
+     */
+    public function migrate(Customer $customer, ShopMigrator $migrator): RedirectResponse
+    {
+        try {
+            $result = $migrator->run($customer);
+        } catch (Throwable $e) {
+            return back()->with('warning', $e->getMessage());
+        }
+
+        return back()->with('success', $result['said']);
     }
 
     public function resume(Customer $customer, ShopControls $controls): RedirectResponse
