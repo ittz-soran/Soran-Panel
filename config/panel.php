@@ -140,6 +140,13 @@ return [
 
     'cpanel' => [
         'uapi' => env('PANEL_UAPI', '/usr/bin/uapi'),
+
+        /*
+         * cPanel's older API2, which still carries functions UAPI does not —
+         * `SubDomain::delsubdomain` among them, which is why removing a shop
+         * needs it. Empty means "beside uapi", which is where it is.
+         */
+        'cpapi2' => env('PANEL_CPAPI2', ''),
         'prefix' => env('PANEL_CPANEL_PREFIX', ''),
 
         /*
