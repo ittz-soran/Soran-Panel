@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\Action;
 use App\Models\User;
 use App\Support\Totp;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -170,5 +171,62 @@ class RecoverPasswordTest extends TestCase
         ]);
 
         $this->assertNull($user->fresh()->remember_token);
+    }
+
+    /**
+     * Section 5: what the panel did, and who told it to.
+     *
+     * The one way into the panel that does not need the password left no trace
+     * at all — a TODO waiting on a table that had existed for a week. There is
+     * no session at this point, so the row has to be told whose it is: reading
+     * `auth()->id()` here records null, and null is not a name.
+     */
+    public function test_recovering_a_password_is_written_down_against_the_name(): void
+    {
+        $user = $this->operator();
+
+        $this->post('/recover-password', [
+            'email' => $user->email,
+            'code' => Totp::at($this->secret),
+            'password' => 'a-brand-new-password',
+            'password_confirmation' => 'a-brand-new-password',
+        ])->assertRedirect(route('login'));
+
+        $action = Action::where('action', 'operator.password_recovered')->firstOrFail();
+
+        $this->assertSame($user->id, $action->user_id, 'the log does not know who it was');
+        $this->assertStringContainsString('six digits', $action->detail['how']);
+    }
+
+    /** Spending one of a finite set is worth telling apart from using the phone. */
+    public function test_a_recovery_code_is_recorded_as_a_recovery_code(): void
+    {
+        $user = $this->operator();
+
+        $this->post('/recover-password', [
+            'email' => $user->email,
+            'code' => $user->two_factor_recovery_codes[0],
+            'password' => 'a-brand-new-password',
+            'password_confirmation' => 'a-brand-new-password',
+        ])->assertRedirect(route('login'));
+
+        $action = Action::where('action', 'operator.password_recovered')->firstOrFail();
+
+        $this->assertStringContainsString('recovery code', $action->detail['how']);
+    }
+
+    /** Nothing is written when the attempt failed. */
+    public function test_a_refused_attempt_leaves_no_row(): void
+    {
+        $user = $this->operator();
+
+        $this->post('/recover-password', [
+            'email' => $user->email,
+            'code' => '000000',
+            'password' => 'a-brand-new-password',
+            'password_confirmation' => 'a-brand-new-password',
+        ])->assertSessionHasErrors('code');
+
+        $this->assertDatabaseMissing('actions', ['action' => 'operator.password_recovered']);
     }
 }

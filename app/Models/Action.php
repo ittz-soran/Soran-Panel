@@ -41,12 +41,27 @@ class Action extends Model
      * can supply the wrong ones — or, on the day it matters, none at all.
      *
      * @param  array<string, mixed>|null  $detail  from → to, as JSON
+     * @param  User|null  $by  ⚠️ The ONE case the paragraph above does not
+     *                         cover: an actor who is known and is not signed
+     *                         in. Recovering a password is the whole of it —
+     *                         somebody proves who they are with the six digits
+     *                         off their phone, sets a new password, and is sent
+     *                         to the sign-in screen without a session. Reading
+     *                         `auth()->id()` there records null, which on the
+     *                         one entry that most needs a name is no name at
+     *                         all. Pass it nowhere else: a caller that supplies
+     *                         the user is a caller that can supply the wrong
+     *                         one.
      */
-    public static function record(string $action, ?Customer $customer = null, ?array $detail = null): self
-    {
+    public static function record(
+        string $action,
+        ?Customer $customer = null,
+        ?array $detail = null,
+        ?User $by = null,
+    ): self {
         return self::create([
             'customer_id' => $customer?->id,
-            'user_id' => auth()->id(),
+            'user_id' => $by?->id ?? auth()->id(),
             'action' => $action,
             'detail' => $detail,
             'ip_address' => request()->ip(),

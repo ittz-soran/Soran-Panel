@@ -416,12 +416,27 @@
     <div class="alert alert-secondary mt-3">
         <h2 class="h6 mb-1"><i class="bi bi-trash3 me-1"></i>This shop was removed
             {{ $customer->deleted_at?->diffForHumans() }}.</h2>
-        <p class="small mb-0">
+        <p class="small mb-1">
             Its folders, its DNS record and its database are gone. What you are reading is the record:
             what it was, every licence it ran on, and everything it paid.
-            <a href="{{ route('actions.index') }}">What I changed</a> has the removal itself, with the
-            backup it was dumped to first.
         </p>
+
+        {{--
+            The dump taken on the way out, which is the only thing left that
+            holds their data. It is the one download on this page that can
+            never be taken again.
+        --}}
+        @foreach ($backups as $taken)
+            @php($path = $taken->detail['backup'] ?? $taken->detail['path'] ?? null)
+            @if ($path && $taken->action === 'shop.removed')
+                <p class="small mb-0">
+                    <a href="{{ route('customers.backup.download', [$customer, $taken]) }}">
+                        <i class="bi bi-download me-1"></i>Download the backup it was dumped to
+                    </a>
+                    — <code>{{ basename($path) }}</code>
+                </p>
+            @endif
+        @endforeach
     </div>
 
     @if ($leftBehind !== [])
@@ -543,15 +558,46 @@
                 variant="warning" />
         </li>
 
-        <li class="list-group-item d-flex flex-wrap justify-content-between align-items-center gap-2">
-            <span>
-                <span class="d-block">Run a backup, and download it</span>
-                <small class="text-secondary">Logged.</small>
-            </span>
-            <button type="button" class="btn btn-sm btn-outline-danger" disabled
-                    title="Not built yet — Section 7">
-                Not built yet
-            </button>
+        <li class="list-group-item">
+            <div class="d-flex flex-wrap justify-content-between align-items-start gap-2">
+                <span>
+                    <span class="d-block">Run a backup, and download it</span>
+                    <small class="text-secondary">
+                        Their own <code>backup:run</code>, kept where their backups go. Downloading is the
+                        only copy that leaves this server — one on the disk dies with the disk.
+                    </small>
+                </span>
+
+                <form method="POST" action="{{ route('customers.backup', $customer) }}"
+                      data-guard-submit class="m-0">
+                    @csrf
+                    <button type="submit" class="btn btn-sm btn-outline-secondary">Back up now</button>
+                </form>
+            </div>
+
+            @if ($backups->isNotEmpty())
+                <ul class="list-unstyled small mt-2 mb-0">
+                    @foreach ($backups as $taken)
+                        @php($path = $taken->detail['path'] ?? $taken->detail['backup'] ?? null)
+                        @continue(! $path)
+                        <li class="d-flex flex-wrap justify-content-between gap-2 border-top py-1">
+                            <span class="text-secondary">
+                                <code>{{ basename($path) }}</code>
+                                — {{ $taken->created_at->diffForHumans() }}
+                                @if ($taken->action === 'shop.migrated')
+                                    <span class="badge text-bg-light">before migrating</span>
+                                @elseif ($taken->action === 'shop.removed')
+                                    <span class="badge text-bg-light">before removing</span>
+                                @endif
+                            </span>
+                            <a href="{{ route('customers.backup.download', [$customer, $taken]) }}"
+                               class="text-decoration-none">
+                                <i class="bi bi-download me-1"></i>Download
+                            </a>
+                        </li>
+                    @endforeach
+                </ul>
+            @endif
         </li>
 
         {{--

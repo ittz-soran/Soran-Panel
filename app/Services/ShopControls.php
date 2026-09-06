@@ -6,15 +6,17 @@ use App\Contracts\ShopReader;
 use App\Contracts\ShopWriter;
 use App\Models\Action;
 use App\Models\Customer;
+use App\Support\ShopBackup;
 use RuntimeException;
 
 /**
  * The things Soran does to a shop that is already running — PANEL_DOC Section 7.
  *
- * All of them work the same way: change the shop's `.env`, make the shop
+ * Most of them work the same way: change the shop's `.env`, make the shop
  * notice, ask it what it now thinks, and write down what was done and by whom.
- * None of them touch a shop's data. Section 7's last line is the boundary and
- * ReadOnlyConnection is what enforces it.
+ * None of them CHANGE a shop's data. Section 7's last line is the boundary and
+ * ReadOnlyConnection is what enforces it — `backUp()` reads all of it, through
+ * the shop's own tooling, and writes none of it.
  */
 class ShopControls
 {
@@ -91,6 +93,34 @@ class ShopControls
                 .'they can still read and print their own records.']
             : ['ok' => false, 'said' => "The licence was taken out of {$customer->name}'s .env, and the shop "
                 .'reports `'.($says ?? 'nothing at all').'` rather than `missing`. It may still be trading. Check it.'];
+    }
+
+    /**
+     * A backup of one shop, now, because somebody asked — Section 7.
+     *
+     * The panel already takes one before migrating a shop and before removing
+     * one. This is the same dump with no second half: the answer to "send me
+     * their data" and to "I am about to do something by hand and want a copy
+     * first", neither of which had anything to press.
+     *
+     * The path is recorded rather than returned into a session, because that is
+     * what the download route reads. **The panel only ever hands over a file it
+     * has a record of writing itself** — no path from the operator reaches the
+     * filesystem, which matters when the file is a whole customer's database.
+     *
+     * @return array{path: string, bytes: int, action: Action}
+     */
+    public function backUp(Customer $customer): array
+    {
+        $path = ShopBackup::take((string) $customer->shop_home, 'so there is no backup to hand you');
+
+        $bytes = (int) filesize($path);
+
+        return [
+            'path' => $path,
+            'bytes' => $bytes,
+            'action' => Action::record('shop.backed_up', $customer, ['path' => $path, 'bytes' => $bytes]),
+        ];
     }
 
     /**

@@ -62,6 +62,20 @@ Route::middleware('auth')->group(function () {
     Route::post('customers/{customer}/suspend', [CustomerController::class, 'suspend'])->name('customers.suspend');
     Route::post('customers/{customer}/resume', [CustomerController::class, 'resume'])->name('customers.resume');
 
+    /*
+     * Section 7: run a shop's backup, and download it.
+     *
+     * The download takes the ACTION, not a path — the panel only hands over a
+     * file it has a record of writing. See CustomerController::downloadBackup.
+     */
+    Route::post('customers/{customer}/backup', [CustomerController::class, 'backUp'])
+        ->name('customers.backup');
+    Route::get('customers/{customer}/backup/{action}', [CustomerController::class, 'downloadBackup'])
+        // withTrashed, like the shop's own page: the dump taken on the way out
+        // is the only thing left that holds a removed shop's data, and it would
+        // be unreachable at the exact moment it is the last copy.
+        ->withTrashed()->name('customers.backup.download');
+
     // Section 3's other half: one codebase updated once leaves every shop's
     // database behind until somebody runs its migrations.
     Route::post('customers/{customer}/migrate', [CustomerController::class, 'migrate'])

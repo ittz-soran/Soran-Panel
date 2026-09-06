@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
+use App\Models\Action;
 use App\Models\User;
 use App\Support\Totp;
 use Illuminate\Http\RedirectResponse;
@@ -57,7 +58,9 @@ class RecoverPasswordController extends Controller
 
         // One message for every way of being wrong, so this cannot be used to
         // ask which addresses have an account or which have an authenticator.
-        if (! $user || ! $user->hasAuthenticator() || ! $this->accepts($user, $data['code'])) {
+        $how = $user && $user->hasAuthenticator() ? $this->accepts($user, $data['code']) : null;
+
+        if ($how === null) {
             RateLimiter::hit($this->key($request, $data['email']), self::LOCKOUT);
 
             throw ValidationException::withMessages([
@@ -74,23 +77,40 @@ class RecoverPasswordController extends Controller
             'remember_token' => null,
         ])->save();
 
-        // TODO (build order step 3): log this against a name in `actions`
-        // (Section 5). The table does not exist yet — it arrives with the
-        // schema — and a logger writing to a table that is not there would
-        // fail closed on the one screen that must not fail.
+        /*
+         * Section 5: what the panel did, and who told it to.
+         *
+         * This waited on the `actions` table, which arrived with the schema and
+         * then went unnoticed for a week — so the one way into the panel that
+         * does not need the password left no trace at all. Nothing sensitive is
+         * kept: that it happened, to whom, from which address, and when.
+         *
+         * `by:` because there is no session here. Whoever did this proved who
+         * they were with the six digits and is now being sent to the sign-in
+         * screen; `auth()->id()` is null, and null is not a name.
+         */
+        Action::record('operator.password_recovered', detail: ['how' => $how], by: $user);
 
         return redirect()->route('login')
             ->with('success', 'The password is changed. Sign in with the new one.');
     }
 
     /** The phone, or one of the eight codes written down when it was set up. */
-    private function accepts(User $user, string $code): bool
+    /**
+     * Which of the two was used, or null for neither.
+     *
+     * It returned a bare true/false until the log needed it, and the difference
+     * is worth recording: a recovery code is one of a finite set, and spending
+     * one is a thing to notice — both because they run out, and because it is
+     * what somebody does when they no longer have the phone.
+     */
+    private function accepts(User $user, string $code): ?string
     {
         if (Totp::check($user->two_factor_secret, $code)) {
-            return true;
+            return 'the six digits from the authenticator';
         }
 
-        return $user->spendRecoveryCode($code);
+        return $user->spendRecoveryCode($code) ? 'a recovery code, now spent' : null;
     }
 
     private function refuseIfTooManyTries(Request $request, string $email): void
