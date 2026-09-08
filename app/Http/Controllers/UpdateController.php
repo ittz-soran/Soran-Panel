@@ -61,4 +61,30 @@ class UpdateController extends Controller
         return redirect()->route('updates')
             ->with($done['warnings'] === [] ? 'success' : 'warning', trim($said.' '.implode(' ', $done['warnings'])));
     }
+
+    /**
+     * Move a checkout off a branch GitHub no longer has.
+     *
+     * Separate from `store`, because it is a different decision: that one takes
+     * commits written for this branch, this one changes which branch is
+     * followed at all. Its guards are in `Checkout::moveToDefaultBranch`.
+     */
+    public function moveBranch(Request $request, Updater $updater): RedirectResponse
+    {
+        $fields = $request->validate([
+            'checkout' => ['required', Rule::in(['panel', 'shop_system'])],
+        ]);
+
+        try {
+            $done = $updater->moveToDefaultBranch($fields['checkout']);
+        } catch (Throwable $e) {
+            return back()->with('warning', $e->getMessage());
+        }
+
+        return redirect()->route('updates', ['check' => 1])->with('success', sprintf(
+            '%s now follows [%s] instead of [%s]. Check for updates again — there may be some waiting.',
+            $fields['checkout'] === 'panel' ? 'The panel' : 'The shop system',
+            $done['now'], $done['was'],
+        ));
+    }
 }

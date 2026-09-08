@@ -419,6 +419,195 @@ class UpdatesTest extends TestCase
             ->assertSessionHasErrors('checkout');
     }
 
+    // ---- A branch that was merged and deleted -----------------------------
+
+    /**
+     * Put the clone on a branch and then delete that branch from the origin.
+     *
+     * This is not an exotic state: it is what every branch looks like a moment
+     * after its pull request is merged, because GitHub deletes it. The shop
+     * system's checkout reached it the ordinary way and Updates could then say
+     * nothing about that checkout at all.
+     */
+    private function strandOnBranch(string $branch = 'feature', bool $merged = true): void
+    {
+        $this->git(['branch', $branch], $this->origin);
+        $this->git(['fetch', '-q', 'origin'], $this->clone);
+        $this->git(['checkout', '-q', '-b', $branch, 'origin/'.$branch], $this->clone);
+
+        if (! $merged) {
+            // Work that only ever existed on this branch. Moving off it would
+            // abandon the commit, which is the case the guard exists for.
+            file_put_contents($this->clone.'/only-here.txt', "never pushed\n");
+            $this->git(['add', '.'], $this->clone);
+            $this->git(['commit', '-qm', 'Work that never reached main'], $this->clone);
+        }
+
+        $this->git(['branch', '-D', $branch], $this->origin);
+    }
+
+    /**
+     * git says `fatal: couldn't find remote ref claude/shop-provision`, which
+     * reads like the server is broken. Nothing is broken — the checkout is
+     * following a branch that has gone.
+     */
+    public function test_a_branch_that_was_merged_and_deleted_is_explained_rather_than_quoted(): void
+    {
+        $this->strandOnBranch();
+
+        try {
+            $this->checkout()->fetch();
+            $this->fail('fetching from a deleted branch reported success');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('GitHub no longer has a branch by that name', $e->getMessage());
+            $this->assertStringContainsString('feature', $e->getMessage());
+            $this->assertStringContainsString('[main]', $e->getMessage(), 'it did not say where to go instead');
+            $this->assertStringNotContainsString('fatal:', $e->getMessage());
+        }
+    }
+
+    public function test_it_knows_whether_the_branch_still_exists(): void
+    {
+        $this->assertFalse($this->checkout()->branchIsGone(), 'a live branch was called gone');
+
+        $this->strandOnBranch();
+
+        $this->assertTrue($this->checkout()->branchIsGone());
+    }
+
+    /** `main` and `master` are both ordinary, and a repository may use neither. */
+    public function test_the_default_branch_is_asked_of_the_remote_rather_than_guessed(): void
+    {
+        $this->assertSame('main', $this->checkout()->defaultBranch());
+
+        // Renaming the checked-out branch moves HEAD with it.
+        $this->git(['branch', '-m', 'main', 'trunk'], $this->origin);
+
+        $this->assertSame('trunk', $this->checkout()->defaultBranch());
+    }
+
+    // ---- Moving it ---------------------------------------------------------
+
+    public function test_a_stranded_checkout_can_be_moved_onto_the_default_branch(): void
+    {
+        $this->strandOnBranch();
+
+        $said = $this->checkout()->moveToDefaultBranch();
+
+        $this->assertSame('main', $this->checkout()->state()['branch']);
+        $this->assertNotSame('', $said);
+
+        // And it can see GitHub again, which is the whole point.
+        $this->commitOnOrigin('Something new');
+        $this->checkout()->fetch();
+
+        $this->assertCount(1, $this->checkout()->waiting());
+    }
+
+    /**
+     * ⚠️ The guard that matters. A branch GitHub deleted after merging holds
+     * nothing that is not in `main`; a branch somebody deleted by mistake may
+     * hold work nobody else has. The panel cannot tell them apart by name, so
+     * it asks git — and refuses rather than abandoning the commit.
+     */
+    public function test_it_refuses_to_move_when_the_branch_holds_work_that_never_merged(): void
+    {
+        $this->strandOnBranch(merged: false);
+
+        try {
+            $this->checkout()->moveToDefaultBranch();
+            $this->fail('a branch with unmerged work was abandoned');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('would leave work behind', $e->getMessage());
+        }
+
+        $this->assertSame('feature', $this->checkout()->state()['branch'], 'it moved anyway');
+        $this->assertFileExists($this->clone.'/only-here.txt');
+    }
+
+    /** Anything uncommitted here was typed on the server by hand. */
+    public function test_it_refuses_to_move_over_uncommitted_work(): void
+    {
+        $this->strandOnBranch();
+
+        file_put_contents($this->clone.'/README.md', "edited on the server\n", FILE_APPEND);
+
+        try {
+            $this->checkout()->moveToDefaultBranch();
+            $this->fail('uncommitted work was written over');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('uncommitted changes', $e->getMessage());
+        }
+
+        $this->assertSame('feature', $this->checkout()->state()['branch']);
+        $this->assertStringContainsString('edited on the server', file_get_contents($this->clone.'/README.md'));
+    }
+
+    // ---- The screen --------------------------------------------------------
+
+    /** The screen reads the real checkouts, so point one of them at the fixture. */
+    private function useTheFixtureAsTheOnlyCheckout(): void
+    {
+        $this->swap(Updater::class, new class($this->clone) extends Updater
+        {
+            public function __construct(private readonly string $path) {}
+
+            public function checkouts(): array
+            {
+                return ['panel' => new Checkout('The panel', $this->path)];
+            }
+        });
+    }
+
+    public function test_the_screen_says_what_happened_and_offers_the_move(): void
+    {
+        $this->strandOnBranch();
+        $this->useTheFixtureAsTheOnlyCheckout();
+
+        $this->get(route('updates', ['check' => 1]))
+            ->assertOk()
+            ->assertSee('GitHub no longer has a branch by that name')
+            ->assertSee('Move it onto')
+            // Not red: nothing here is broken, and sending somebody to the
+            // server to look for damage that is not there wastes an evening.
+            ->assertSee('alert-warning', escape: false)
+            // The details stay readable — this is a working checkout.
+            ->assertSee('feature');
+    }
+
+    public function test_moving_from_the_screen_works_and_is_written_down(): void
+    {
+        $this->strandOnBranch();
+        $this->useTheFixtureAsTheOnlyCheckout();
+
+        $this->post(route('updates.branch'), ['checkout' => 'panel'])
+            ->assertSessionHas('success', fn (string $said) => str_contains($said, 'now follows')
+                && str_contains($said, 'main'));
+
+        $this->assertSame('main', $this->checkout()->state()['branch']);
+
+        $action = Action::where('action', 'codebase.branch_changed')->firstOrFail();
+
+        $this->assertSame('feature', $action->detail['from']);
+        $this->assertSame('main', $action->detail['to']);
+        $this->assertSame('Soran', $action->user->name);
+    }
+
+    public function test_a_checkout_already_on_the_default_branch_is_told_so(): void
+    {
+        $this->useTheFixtureAsTheOnlyCheckout();
+
+        $this->post(route('updates.branch'), ['checkout' => 'panel'])
+            ->assertSessionHas('warning', fn (string $said) => str_contains($said, 'already on [main]'));
+    }
+
+    public function test_moving_a_branch_is_behind_the_sign_in(): void
+    {
+        auth()->logout();
+
+        $this->post(route('updates.branch'), ['checkout' => 'panel'])->assertRedirect(route('login'));
+    }
+
     private function rmrf(string $path): void
     {
         if ($path === '' || ! is_dir($path)) {

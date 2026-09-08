@@ -92,6 +92,10 @@ Route::middleware('auth')->group(function () {
     Route::get('updates', [UpdateController::class, 'index'])->name('updates');
     Route::post('updates', [UpdateController::class, 'store'])->name('updates.store');
 
+    // When the branch a checkout follows has been merged and deleted, which is
+    // the ordinary end of a branch and left Updates unable to say anything.
+    Route::post('updates/branch', [UpdateController::class, 'moveBranch'])->name('updates.branch');
+
     /*
      * Who may sign in. Not under a customer, because an operator belongs to the
      * panel: PANEL_DOC Section 5 keeps `actions` with a nullable customer_id
