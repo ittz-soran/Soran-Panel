@@ -40,9 +40,43 @@
                 </div>
 
                 <div class="card-body">
-                    @if($it['problem'])
+                    {{--
+                        A branch that was merged and deleted is not a broken
+                        checkout, and drawing it in red as one sends somebody to
+                        the server looking for damage that is not there. The
+                        code here is fine — it is following something that has
+                        gone — so it is amber, it keeps its details, and it
+                        carries the one button that fixes it.
+                    --}}
+                    @if($it['problem'] && $it['stranded'])
+                        <div class="alert alert-warning small">
+                            <i class="bi bi-exclamation-triangle me-1"></i>{{ $it['problem'] }}
+
+                            @if($it['default_branch'] && $it['clean'])
+                                <form method="POST" action="{{ route('updates.branch') }}"
+                                      data-guard-submit class="mt-2 mb-0">
+                                    @csrf
+                                    <input type="hidden" name="checkout" value="{{ $key }}">
+                                    <button type="submit" class="btn btn-sm btn-outline-secondary">
+                                        Move it onto <span class="font-monospace">{{ $it['default_branch'] }}</span>
+                                    </button>
+                                </form>
+                                <div class="text-secondary mt-1">
+                                    Refused if anything here is uncommitted, or if this branch holds a commit
+                                    that never reached <span class="font-monospace">{{ $it['default_branch'] }}</span>.
+                                </div>
+                            @elseif(! $it['clean'])
+                                <div class="mt-1">
+                                    There are uncommitted changes here, so the panel will not move it. Deal
+                                    with them on the server first.
+                                </div>
+                            @endif
+                        </div>
+                    @elseif($it['problem'])
                         <div class="alert alert-danger mb-0 small">{{ $it['problem'] }}</div>
-                    @else
+                    @endif
+
+                    @if(! $it['problem'] || $it['stranded'])
                         <dl class="row mb-0 small">
                             <dt class="col-4 fw-normal text-secondary">Branch</dt>
                             <dd class="col-8 font-monospace">{{ $it['branch'] }}</dd>

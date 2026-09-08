@@ -96,7 +96,131 @@ class Checkout
          */
         $branch = $state['branch'];
 
-        $this->git(['fetch', 'origin', "+{$branch}:refs/remotes/origin/{$branch}"]);
+        try {
+            $this->git(['fetch', 'origin', "+{$branch}:refs/remotes/origin/{$branch}"]);
+        } catch (RuntimeException $e) {
+            /*
+             * ⚠️ **A branch that was merged and then deleted.** This is not an
+             * error the operator can act on as git words it:
+             *
+             *     fatal: couldn't find remote ref claude/shop-provision
+             *
+             * It happened to the shop system's checkout the ordinary way — the
+             * branch it was deployed from was merged into main and GitHub
+             * deleted it, as it does — and from then on Updates could say
+             * nothing about that checkout at all. Nothing is wrong with the
+             * server, nothing is wrong with the code on it, and git's sentence
+             * suggests both.
+             */
+            if (str_contains($e->getMessage(), "couldn't find remote ref")) {
+                throw new RuntimeException(sprintf(
+                    'This checkout is on [%s], and GitHub no longer has a branch by that name — which is '
+                    .'what happens when a branch is merged and deleted. The code here is fine; it is just '
+                    .'following something that has gone.%s',
+                    $branch,
+                    ($default = $this->defaultBranch()) === null
+                        ? ' Move it onto the branch you want it to follow.'
+                        : " Move it onto [{$default}], which is where that work ended up.",
+                ), previous: $e);
+            }
+
+            throw $e;
+        }
+    }
+
+    /**
+     * The branch GitHub treats as this repository's main one.
+     *
+     * Asked of the remote rather than guessed at: `main` and `master` are both
+     * ordinary, and a repository is free to call it something else entirely.
+     * `--symref` is what makes HEAD readable without cloning anything.
+     */
+    public function defaultBranch(): ?string
+    {
+        try {
+            $said = $this->git(['ls-remote', '--symref', 'origin', 'HEAD']);
+        } catch (RuntimeException) {
+            return null;
+        }
+
+        return preg_match('#^ref:\s+refs/heads/(\S+)\s+HEAD#m', $said, $found) === 1 ? $found[1] : null;
+    }
+
+    /**
+     * Whether the branch this checkout follows still exists on GitHub.
+     *
+     * Its own method because the screen asks it to decide what to offer, and a
+     * failed fetch is a slow and destructive way to find out.
+     */
+    public function branchIsGone(): bool
+    {
+        $branch = $this->state()['branch'];
+
+        if ($branch === null) {
+            return false;
+        }
+
+        try {
+            return trim($this->git(['ls-remote', '--heads', 'origin', $branch])) === '';
+        } catch (RuntimeException) {
+            // Could not ask. "I do not know" is not "it is gone", and offering
+            // to move a checkout on a network hiccup is the wrong way to be
+            // wrong.
+            return false;
+        }
+    }
+
+    /**
+     * Move this checkout onto the repository's default branch.
+     *
+     * ⚠️ **Only when nothing can be lost by it**, and both guards matter:
+     *
+     *   - The working tree must be clean, because anything uncommitted here was
+     *     typed on the server by hand and switching branches over it is how
+     *     that disappears.
+     *   - Every commit here must already be contained in the default branch.
+     *     That is the difference between "this branch was merged and tidied
+     *     away" — where moving loses nothing at all — and "this branch has work
+     *     that never went anywhere", where moving abandons it. The panel cannot
+     *     tell those apart by the name, so it asks git.
+     *
+     * @return string what git said, for the screen
+     */
+    public function moveToDefaultBranch(): string
+    {
+        $state = $this->state();
+
+        if (! $state['ok']) {
+            throw new RuntimeException($state['problem'] ?? 'This checkout cannot be read.');
+        }
+
+        if (! $state['clean']) {
+            throw new RuntimeException(
+                "[{$this->path}] has uncommitted changes. Whatever they are, they were made on the server "
+                .'by hand — commit or discard them there before moving this checkout.',
+            );
+        }
+
+        $default = $this->defaultBranch()
+            ?? throw new RuntimeException('GitHub did not say which branch this repository treats as its main one.');
+
+        if ($default === $state['branch']) {
+            throw new RuntimeException("This checkout is already on [{$default}].");
+        }
+
+        $this->git(['fetch', 'origin', "+{$default}:refs/remotes/origin/{$default}"]);
+
+        try {
+            $this->git(['merge-base', '--is-ancestor', 'HEAD', 'origin/'.$default]);
+        } catch (RuntimeException) {
+            throw new RuntimeException(sprintf(
+                'The commits on [%s] are not all in [%s], so moving this checkout would leave work behind. '
+                .'Nothing has been changed. Look at it on the server before deciding.',
+                $state['branch'], $default,
+            ));
+        }
+
+        return trim($this->git(['checkout', '-B', $default, 'origin/'.$default]));
     }
 
     /**

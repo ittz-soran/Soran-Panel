@@ -57,6 +57,8 @@ class Updater
             $asked = false;
             $problem = $state['problem'];
 
+            $stranded = false;
+
             if ($state['ok'] && $askGithub) {
                 try {
                     $checkout->fetch();
@@ -64,6 +66,11 @@ class Updater
                     $asked = true;
                 } catch (RuntimeException $e) {
                     $problem = $e->getMessage();
+
+                    // Asked only when the fetch already failed, because it is
+                    // another round trip to GitHub and the answer only matters
+                    // in the one case where the screen has something to offer.
+                    $stranded = $checkout->branchIsGone();
                 }
             }
 
@@ -74,10 +81,45 @@ class Updater
                 'path' => $checkout->path,
                 'waiting' => $waiting,
                 'asked' => $asked,
+
+                // The branch this follows is gone from GitHub, and the screen
+                // can offer to move it. See Checkout::moveToDefaultBranch.
+                'stranded' => $stranded,
+                'default_branch' => $stranded ? $checkout->defaultBranch() : null,
             ];
         }
 
         return $seen;
+    }
+
+    /**
+     * Move a checkout off a branch GitHub no longer has.
+     *
+     * Its own action rather than part of `update()`, because it is a different
+     * decision: updating takes commits somebody wrote for this branch, and this
+     * changes which branch is being followed at all. The guards live in
+     * `Checkout::moveToDefaultBranch` — clean tree, and nothing here that is
+     * not already in the branch it moves to.
+     *
+     * @return array{was: ?string, now: ?string, said: string}
+     */
+    public function moveToDefaultBranch(string $which): array
+    {
+        $checkout = $this->checkouts()[$which]
+            ?? throw new RuntimeException("There is no checkout called [{$which}].");
+
+        $was = $checkout->state()['branch'];
+        $said = $checkout->moveToDefaultBranch();
+        $now = $checkout->state()['branch'];
+
+        Action::record('codebase.branch_changed', null, [
+            'checkout' => $checkout->name,
+            'path' => $checkout->path,
+            'from' => $was,
+            'to' => $now,
+        ]);
+
+        return ['was' => $was, 'now' => $now, 'said' => $said];
     }
 
     /**
