@@ -27,12 +27,34 @@ jobs:
       - uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ matrix.php }}
-          extensions: dom, curl, libxml, mbstring, zip, pcntl, pdo, sqlite, pdo_sqlite, intl, gd, openssl
+          extensions: dom, curl, libxml, mbstring, zip, pcntl, pdo, sqlite, pdo_sqlite, intl, gd, openssl, posix
           coverage: none
 
       - run: composer install --prefer-dist --no-interaction --no-progress
       - run: cp .env.example .env
       - run: php artisan key:generate
+
+      # PANEL_DOC Section 10: the panel reuses the shop system's look by copying
+      # its compiled build/ in at deploy time. That is a real coupling between
+      # two repositories and nothing was checking it — BorrowedStylesheetTest
+      # skips itself when public/build is absent, which in CI was always. So the
+      # one check that would catch "the shop system renamed a Vite entry and now
+      # every panel page throws" never ran anywhere at all.
+      #
+      # Only build/ is taken, not the whole system: it is the single thing that
+      # crosses, and a sparse checkout keeps it that way.
+      - name: Borrow the shop system's compiled assets
+        uses: actions/checkout@v4
+        with:
+          repository: ittz-soran/SystemManagment
+          path: .shop-system
+          sparse-checkout: public/build
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Put them where a deploy would
+        run: cp -r .shop-system/public/build public/build
+
       - run: php artisan test
 
   mariadb:
@@ -62,12 +84,40 @@ jobs:
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.3'
-          extensions: dom, curl, libxml, mbstring, zip, pcntl, pdo, mysql, pdo_mysql, intl, gd, openssl
+          extensions: dom, curl, libxml, mbstring, zip, pcntl, pdo, mysql, pdo_mysql, intl, gd, openssl, posix
           coverage: none
 
       - run: composer install --prefer-dist --no-interaction --no-progress
       - run: cp .env.example .env
       - run: php artisan key:generate
+
+      # PanelBackup shells out to mysqldump and mysql. Without them the panel's
+      # own backup and — more to the point — the restore drill skip themselves,
+      # and Section 13 calls losing this database worse than losing any one
+      # shop. A skipped drill is not a drill.
+      - name: Install the client tools the backup shells out to
+        run: sudo apt-get install -y --no-install-recommends mariadb-client
+
+      # PANEL_DOC Section 10: the panel reuses the shop system's look by copying
+      # its compiled build/ in at deploy time. That is a real coupling between
+      # two repositories and nothing was checking it — BorrowedStylesheetTest
+      # skips itself when public/build is absent, which in CI was always. So the
+      # one check that would catch "the shop system renamed a Vite entry and now
+      # every panel page throws" never ran anywhere at all.
+      #
+      # Only build/ is taken, not the whole system: it is the single thing that
+      # crosses, and a sparse checkout keeps it that way.
+      - name: Borrow the shop system's compiled assets
+        uses: actions/checkout@v4
+        with:
+          repository: ittz-soran/SystemManagment
+          path: .shop-system
+          sparse-checkout: public/build
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Put them where a deploy would
+        run: cp -r .shop-system/public/build public/build
 
       - name: Execute tests against MariaDB
         env:
