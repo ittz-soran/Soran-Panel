@@ -111,6 +111,59 @@ class UpdatesTest extends TestCase
 
     // ---- Reading it -------------------------------------------------------
 
+    /**
+     * The refusal has to name the files, not just refuse.
+     *
+     * It used to say "look at `git status` there" — to somebody holding an iPad,
+     * having itself just run the one command that could have answered. The list
+     * was in hand and thrown away, so the guard was correct and the screen was a
+     * dead end.
+     */
+    public function test_it_says_which_files_are_uncommitted(): void
+    {
+        // One tracked file edited, one file git has never seen.
+        file_put_contents($this->clone.'/README.md', "changed by hand\n", FILE_APPEND);
+        file_put_contents($this->clone.'/notes.txt', "left on the server\n");
+
+        $state = $this->checkout()->state();
+
+        $this->assertFalse($state['clean']);
+
+        $paths = array_column($state['uncommitted'], 'path');
+        sort($paths);
+
+        $this->assertSame(['README.md', 'notes.txt'], $paths);
+
+        $said = array_column($state['uncommitted'], 'status', 'path');
+
+        // In words rather than git's two letters — the reader of this screen is
+        // not obliged to know what `??` means.
+        $this->assertSame('changed', $said['README.md']);
+        $this->assertSame('new file, not in git', $said['notes.txt']);
+    }
+
+    /** A clean checkout offers no list at all, rather than an empty box. */
+    public function test_a_clean_checkout_has_nothing_to_list(): void
+    {
+        $state = $this->checkout()->state();
+
+        $this->assertTrue($state['clean']);
+        $this->assertSame([], $state['uncommitted']);
+    }
+
+    /** And the screen shows them, which is the whole point. */
+    public function test_the_screen_names_the_uncommitted_files(): void
+    {
+        file_put_contents($this->clone.'/README.md', "changed by hand\n", FILE_APPEND);
+        $this->useTheFixtureAsTheOnlyCheckout();
+
+        $this->get(route('updates'))
+            ->assertOk()
+            ->assertSee('are not committed')
+            ->assertSee('README.md')
+            ->assertSee('changed');
+    }
+
     public function test_it_says_what_is_installed(): void
     {
         $state = $this->checkout()->state();

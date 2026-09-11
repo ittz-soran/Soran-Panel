@@ -103,6 +103,34 @@
                                 <i class="bi bi-exclamation-triangle me-1"></i>
                                 There are changes here that are not committed. Updating is refused until they
                                 are dealt with, because a pull would write over them.
+
+                                @if($it['uncommitted'] !== [])
+                                    <ul class="list-unstyled mt-2 mb-0 font-monospace">
+                                        @foreach(array_slice($it['uncommitted'], 0, 20) as $change)
+                                            <li>
+                                                <span class="text-body-secondary">{{ $change['status'] }}</span>
+                                                &middot; {{ $change['path'] }}
+                                            </li>
+                                        @endforeach
+                                    </ul>
+
+                                    @if(count($it['uncommitted']) > 20)
+                                        <div class="mt-1">
+                                            &hellip; and {{ count($it['uncommitted']) - 20 }} more.
+                                        </div>
+                                    @endif
+
+                                    {{-- The overwhelmingly common cause, and the one the panel
+                                         cannot safely fix for you: build/ is committed in the shop
+                                         system now, so a build uploaded or extracted on the server
+                                         shows up here as changed tracked files. --}}
+                                    <div class="mt-2">
+                                        If these are all under <code>public/build</code>, they are the
+                                        compiled assets: those are committed now, so the copy in git is
+                                        the one to keep. <code>git checkout -- public/build</code> in
+                                        that folder puts it back and lets the update run.
+                                    </div>
+                                @endif
                             </div>
                         @endunless
 

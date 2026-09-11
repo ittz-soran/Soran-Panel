@@ -35,13 +35,14 @@ class Checkout
      *
      * @return array{
      *     ok: bool, problem: ?string, branch: ?string, commit: ?string,
-     *     subject: ?string, when: ?string, clean: bool
+     *     subject: ?string, when: ?string, clean: bool,
+     *     uncommitted: list<array{status: string, path: string}>
      * }
      */
     public function state(): array
     {
         $blank = ['ok' => false, 'problem' => null, 'branch' => null, 'commit' => null,
-            'subject' => null, 'when' => null, 'clean' => false];
+            'subject' => null, 'when' => null, 'clean' => false, 'uncommitted' => []];
 
         if (! is_dir($this->path.'/.git')) {
             return [...$blank, 'problem' => "[{$this->path}] is not a git checkout."];
@@ -49,6 +50,7 @@ class Checkout
 
         try {
             $branch = trim($this->git(['rev-parse', '--abbrev-ref', 'HEAD']));
+            $changed = $this->uncommitted();
 
             if ($branch === 'HEAD') {
                 return [...$blank, 'problem' => 'This checkout is not on a branch, so there is nothing to '
@@ -65,11 +67,73 @@ class Checkout
 
                 // Anything uncommitted here was done on the server by hand, and
                 // pulling over it is how that gets lost.
-                'clean' => trim($this->git(['status', '--porcelain'])) === '',
+                'clean' => $changed === [],
+
+                // And WHICH files, because the refusal was previously a dead
+                // end: it said "look at `git status` there" to somebody holding
+                // an iPad, having just run the one command that could have told
+                // them. The list was already in hand and thrown away.
+                'uncommitted' => $changed,
             ];
         } catch (RuntimeException $e) {
             return [...$blank, 'problem' => $e->getMessage()];
         }
+    }
+
+    /**
+     * The files changed here but not committed, as git reports them.
+     *
+     * Porcelain v1 is a stable format on purpose: two status characters, a
+     * space, then the path. A rename carries `old -> new`, and the new name is
+     * the one worth showing.
+     *
+     * @return list<array{status: string, path: string}>
+     */
+    private function uncommitted(): array
+    {
+        // rtrim, not trim. Porcelain v1 is two status characters then a space,
+        // and an unstaged change leaves the first of those blank — ` M file`.
+        // Trimming the whole output eats that space off the first line only,
+        // and the path then loses its first letter: `EADME.md`.
+        $lines = preg_split('/\R/', rtrim($this->git(['status', '--porcelain']))) ?: [];
+
+        $changed = [];
+
+        foreach ($lines as $line) {
+            if (trim($line) === '') {
+                continue;
+            }
+
+            $path = trim(substr($line, 3));
+
+            if (str_contains($path, ' -> ')) {
+                $path = substr($path, strpos($path, ' -> ') + 4);
+            }
+
+            $changed[] = [
+                'status' => $this->inPlainWords(substr($line, 0, 2)),
+                'path' => trim($path, '"'),
+            ];
+        }
+
+        return $changed;
+    }
+
+    /**
+     * What git's two letters mean, for somebody who does not read git.
+     */
+    private function inPlainWords(string $code): string
+    {
+        $code = trim($code);
+
+        return match (true) {
+            $code === '??' => 'new file, not in git',
+            str_contains($code, 'D') => 'deleted',
+            str_contains($code, 'R') => 'renamed',
+            str_contains($code, 'A') => 'added',
+            str_contains($code, 'M') => 'changed',
+            default => $code,
+        };
     }
 
     /** Ask GitHub what it has, without changing anything here. */
