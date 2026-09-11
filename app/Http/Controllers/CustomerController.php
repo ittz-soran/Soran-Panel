@@ -141,6 +141,20 @@ class CustomerController extends Controller
         return back()->with('warning', $result['said']);
     }
 
+    /**
+     * Throw away what this shop compiled from the shared code.
+     *
+     * No typed name and no hold: it destroys nothing and takes seconds. What it
+     * costs is one slow page while the shop rebuilds its caches, which is the
+     * cheapest thing on this screen.
+     */
+    public function clearCompiledCode(Customer $customer, ShopControls $controls): RedirectResponse
+    {
+        $result = $controls->clearCompiledCode($customer);
+
+        return back()->with($result['ok'] ? 'success' : 'warning', $result['said']);
+    }
+
     /** Section 7: run a shop's backup, and download it. Logged. */
     public function backUp(Customer $customer, ShopControls $controls): RedirectResponse
     {

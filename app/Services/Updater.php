@@ -2,9 +2,7 @@
 
 namespace App\Services;
 
-use App\Contracts\ShopWriter;
 use App\Models\Action;
-use App\Models\Customer;
 use RuntimeException;
 
 /**
@@ -240,14 +238,9 @@ class Updater
      */
     private function clearEveryShop(): array
     {
-        $writer = app(ShopWriter::class);
-        $stubborn = [];
-
-        foreach (Customer::all() as $customer) {
-            if (! $writer->clearCache($customer)) {
-                $stubborn[] = $customer->name;
-            }
-        }
+        // The same thing the Updates screen's own button does, so there is one
+        // implementation of "clear them all" rather than two that can drift.
+        $stubborn = app(ShopControls::class)->clearEveryShop()['stubborn'];
 
         return $stubborn === [] ? [] : [
             'These shops still have the old compiled code and may not work until it is cleared: '
