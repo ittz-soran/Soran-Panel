@@ -44,6 +44,17 @@ class UpdatesTest extends TestCase
         $this->clone = $this->root.'/clone';
 
         $this->makeRepository();
+
+        // Where the borrowed look is taken from and where it lands. Without
+        // these, updating the shop system in a test would read the real .env's
+        // /home/soransto path and write into this repository's own public/.
+        mkdir($this->root.'/panel-public', 0777, true);
+        $this->app->usePublicPath($this->root.'/panel-public');
+
+        config([
+            'panel.shops.shared_artisan' => $this->clone.'/artisan',
+            'panel.shops.public_root' => $this->root.'/public_html',
+        ]);
     }
 
     protected function tearDown(): void
@@ -90,6 +101,13 @@ class UpdatesTest extends TestCase
             $this->origin.'/artisan',
             "<?php\nfile_put_contents(__DIR__.'/asked', (\$argv[1] ?? '').PHP_EOL, FILE_APPEND);\nexit(0);\n",
         );
+        // The compiled look the panel borrows from this codebase — Section 10.
+        // Committed here because it is committed in the real shop system, and
+        // because updating the shop system now refreshes the panel's copy of it.
+        mkdir($this->origin.'/public/build/assets', 0777, true);
+        file_put_contents($this->origin.'/public/build/manifest.json', '"the first build"');
+        file_put_contents($this->origin.'/public/build/assets/app-first.css', 'body{}');
+
         $this->git(['add', '.'], $this->origin);
         $this->git(['commit', '-qm', 'The first commit'], $this->origin);
 
@@ -464,6 +482,71 @@ class UpdatesTest extends TestCase
 
         $this->assertNotContains('migrate', $this->artisanWasAsked());
         $this->assertContains('optimize:clear', $this->artisanWasAsked());
+    }
+
+    /**
+     * ⚠️ The panel has no stylesheet of its own — Section 10. It wears a COPY of
+     * the shop system's compiled build, so pulling new shop-system code moves
+     * the panel's markup and would leave its stylesheet behind. That drift is
+     * silent until a screen looks wrong, and this is the only moment it can
+     * begin.
+     */
+    public function test_updating_the_shop_system_refreshes_the_look_the_panel_borrows(): void
+    {
+        // The panel is wearing what it was given at deploy time.
+        mkdir(public_path('build/assets'), 0777, true);
+        file_put_contents(public_path('build/manifest.json'), '"the first build"');
+
+        // And the shop system's next commit rebuilds it.
+        file_put_contents($this->origin.'/public/build/manifest.json', '"the second build"');
+        $this->commitOnOrigin('A rebuilt front end', 'public/build/assets/app-second.css');
+
+        $this->swapUpdaterFor('shop_system');
+
+        $this->post(route('updates.store'), ['checkout' => 'shop_system'])->assertSessionHas('success');
+
+        $this->assertSame('"the second build"', file_get_contents(public_path('build/manifest.json')));
+    }
+
+    /**
+     * ⚠️ A panel with no borrowed stylesheet serves unstyled HTML on every
+     * screen — including this one. So this card has to say what is wrong in
+     * words, not by looking wrong: looking wrong is the symptom, and by then
+     * every card on the page looks the same.
+     */
+    public function test_the_screen_says_when_the_borrowed_look_is_missing(): void
+    {
+        $this->get(route('updates'))
+            ->assertOk()
+            ->assertSee('The look borrowed from the shop system')
+            ->assertSee('serving unstyled HTML');
+
+        mkdir(public_path('build/assets'), 0777, true);
+        file_put_contents(public_path('build/manifest.json'), '"a build"');
+
+        $this->get(route('updates'))
+            ->assertOk()
+            ->assertDontSee('serving unstyled HTML');
+    }
+
+    public function test_the_button_takes_the_look_again(): void
+    {
+        $this->post(route('updates.look'))->assertSessionHas('success');
+
+        $this->assertSame('"the first build"', file_get_contents(public_path('build/manifest.json')));
+    }
+
+    /** And it says why rather than half-doing it, when there is nothing to take. */
+    public function test_the_button_refuses_when_there_is_nothing_to_take(): void
+    {
+        mkdir(public_path('build'), 0777, true);
+        file_put_contents(public_path('build/manifest.json'), '"what it is wearing"');
+
+        config(['panel.shops.shared_artisan' => $this->root.'/not-here/artisan']);
+
+        $this->post(route('updates.look'))->assertSessionHas('warning');
+
+        $this->assertSame('"what it is wearing"', file_get_contents(public_path('build/manifest.json')));
     }
 
     public function test_updating_something_that_is_not_a_checkout_is_refused(): void

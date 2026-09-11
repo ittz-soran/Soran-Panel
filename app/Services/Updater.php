@@ -206,6 +206,29 @@ class Updater
          */
         if ($which === 'shop_system') {
             $warnings = [...$warnings, ...$this->clearEveryShop()];
+
+            /*
+             * And the look the panel borrows from it — Section 10.
+             *
+             * The panel has no stylesheet of its own: it wears a COPY of the
+             * shop system's compiled build. So pulling new shop-system code
+             * moves the panel's markup and leaves its stylesheet where it was,
+             * and nothing says so until a screen looks wrong. This is the only
+             * moment that drift can begin, which makes it the moment to close
+             * it — leaving it to a deploy step is what let the live panel end
+             * up wearing a build three weeks older than its own markup.
+             *
+             * A warning rather than a failure: the code is already pulled, and
+             * BorrowedLook never takes the old copy away unless it has a whole
+             * new one to put there, so the panel is still wearing something.
+             */
+            try {
+                app(BorrowedLook::class)->refresh();
+            } catch (RuntimeException $e) {
+                $warnings[] = 'The shop system is updated, but the look the panel borrows from it was not '
+                    .'refreshed, so the panel’s own screens may not match their stylesheet — run '
+                    .'`php artisan panel:assets`. '.$e->getMessage();
+            }
         }
 
         $after = $checkout->state();
