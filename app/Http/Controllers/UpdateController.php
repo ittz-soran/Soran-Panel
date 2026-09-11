@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\BorrowedLook;
 use App\Services\ShopControls;
 use App\Services\Updater;
 use Illuminate\Http\RedirectResponse;
@@ -20,13 +21,25 @@ use Throwable;
  */
 class UpdateController extends Controller
 {
-    public function index(Request $request, Updater $updater): View
+    public function index(Request $request, Updater $updater, BorrowedLook $look): View
     {
         $asked = $request->boolean('check');
 
         return view('updates.index', [
             'checkouts' => $updater->look(askGithub: $asked),
             'asked' => $asked,
+
+            // Section 10: the panel wears a copy of the shop system's compiled
+            // build. When that copy is gone every screen serves unstyled HTML,
+            // and this screen is where the way back has to be — a panel in that
+            // state is exactly a panel whose owner cannot see what is wrong.
+            'lookInPlace' => $look->inPlace(),
+            'lookSource' => $look->source(),
+
+            // And the silent half of it: the folder the domain serves holding
+            // an older copy than the manifest names. Nothing throws, every
+            // stylesheet 404s, and the panel looks broken for no stated reason.
+            'lookStale' => $look->stale(),
         ]);
     }
 
@@ -86,6 +99,27 @@ class UpdateController extends Controller
             '%s now follows [%s] instead of [%s]. Check for updates again — there may be some waiting.',
             $fields['checkout'] === 'panel' ? 'The panel' : 'The shop system',
             $done['now'], $done['was'],
+        ));
+    }
+
+    /**
+     * Take the shop system's compiled look again — Section 10.
+     *
+     * Its own action rather than part of `store`, because it fixes something
+     * updating cannot: a panel whose borrowed stylesheet is missing is already
+     * up to date, so the update button has nothing to offer it and says so.
+     */
+    public function refreshLook(BorrowedLook $look): RedirectResponse
+    {
+        try {
+            $written = $look->refresh();
+        } catch (Throwable $e) {
+            return back()->with('warning', $e->getMessage());
+        }
+
+        return back()->with('success', sprintf(
+            'The panel is wearing the shop system’s compiled look again — %s.',
+            implode(' and ', $written),
         ));
     }
 

@@ -387,6 +387,30 @@ What crosses between them is deliberately small and one-directional:
 - The panel **reuses the look** — Bootstrap 5.3 and the shop system's compiled
   stylesheet — by copying `build/` at deploy time, not by depending on it.
 
+  **There are two copies of it**, and that is the whole trouble: the panel's own
+  `public/build`, which is where `@vite` reads the manifest, and the copy inside
+  `public_html`, which is what a browser actually fetches the files from.
+  Refresh only the first and the manifest names the new hash while the folder
+  being served still holds the old one — nothing throws, the page renders in
+  full, every stylesheet 404s, and the panel serves its real content as unstyled
+  HTML. That is **not** the same as having no build at all, which raises Vite's
+  own exception and gets the page that explains itself; this one is silent. It
+  happened on the live panel on 11 September, from a `panel:public` that refused
+  a folder already holding a panel because it was not given `--force`. The
+  Updates screen now names any served folder holding an older copy.
+
+  **A copy goes stale and a copy can be lost, and both have now happened.** So
+  the copying is `BorrowedLook`, not a shell command: the panel refreshes it
+  automatically whenever it updates the shop system — the only moment the two
+  can drift apart — and `php artisan panel:assets`, or the button on Updates,
+  takes it again on demand. It replaces the copy by writing the new one in
+  beside the old and swapping with a rename, **never by deleting first**: the
+  `rm -rf` then `cp -r` order cannot survive the copy failing, and it is what
+  left the live panel serving unstyled HTML on 11 September. Both copies are
+  refreshed — the panel's own `public/build` and the one inside `public_html`
+  that the domain actually serves, which `panel:public` copies rather than
+  links.
+
 **The licence public key** is the one constant both sides need. The shop system
 holds it in `config/licence.php`; the panel needs the same value to verify a
 pasted licence before delivering it (Section 6). Copy it into the panel's own

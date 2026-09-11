@@ -260,8 +260,20 @@ Copy the shop system's compiled assets in — Section 10: the panel has no
 stylesheet of its own and no npm build.
 
 ```bash
-cp -r ~/smart-store/public/build ~/panel/public/build
+php artisan panel:assets
 ```
+
+⚠️ **Use the command, not `rm -rf` and `cp -r`.** The shell pair deletes the old
+copy before it knows the new one can be made, so an unpulled shop system or a
+full disk leaves the panel with no look at all — unstyled HTML on every screen,
+including the one that would explain it. That happened on the live panel on
+11 September. `panel:assets` reads the source first and refuses without touching
+anything, then swaps the two with a rename. It also refreshes the copy inside
+`public_html`, which is the one the domain actually serves.
+
+**If the panel is already serving unstyled HTML**, this is the way back — and it
+is also a button on the **Updates** screen, which stays readable because it says
+so in words rather than by looking right.
 
 ---
 
@@ -646,7 +658,7 @@ back.
 | A removed shop's domain is still in cPanel → Domains | UAPI has `SubDomain::addsubdomain` and, on some accounts, no `delsubdomain` — cPanel kept that one in API2. The panel tries both and checks afterwards, so it tells you when the domain survived. If it reports one, delete it there by hand; nothing else is left. |
 | A domain 404s from LiteSpeed even for `/robots.txt` | Its document root. `uapi DomainInfo single_domain_data domain=<host>` — if the home folder appears twice, the Document Root field was given an absolute path. Step 6a. |
 | `git clone` asks for a password and then refuses it | GitHub has not accepted passwords for git since 2021. Step 0b — a token or a deploy key. |
-| Unstyled HTML | `public/build` is missing. Copy it from the shop system, then `panel:public` again. |
+| Unstyled HTML | The borrowed `build/` is missing. `php artisan panel:assets` — or the button on **Updates**. It refreshes both copies, so `panel:public` is not needed afterwards. |
 | A 500 with no detail | `storage/logs/laravel.log`. `APP_DEBUG` stays off. |
 | `.env` visible in a browser | The code is inside the document root. Move it out and run `panel:public`. |
 | A setting change does nothing | `php artisan optimize:clear`, then re-cache. |

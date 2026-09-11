@@ -205,4 +205,56 @@
         </div>
     </div>
 
+    {{--
+        The look the panel borrows — Section 10.
+
+        Its own card rather than a line in the one above, because it answers a
+        different question. That one is "is my code current?"; this is "why does
+        the panel look like a 1994 web page?" — and when that has happened, this
+        card is the only thing on screen still able to say so, because the
+        stylesheet that would have hidden it is the thing that is missing.
+    --}}
+    <div class="card mt-3 {{ $lookInPlace && $lookStale === [] ? '' : 'border-danger' }}">
+        <div class="card-body d-flex flex-wrap justify-content-between align-items-center gap-3">
+            <span>
+                <span class="d-block">
+                    The look borrowed from the shop system
+                    @unless($lookInPlace)
+                        <span class="badge text-bg-danger ms-1">missing</span>
+                    @elseif($lookStale !== [])
+                        <span class="badge text-bg-danger ms-1">half updated</span>
+                    @endunless
+                </span>
+                <small class="text-secondary">
+                    @if($lookInPlace && $lookStale !== [])
+                        These folders are serving an older copy than the panel is asking for, so every
+                        stylesheet on every screen is a 404 and the panel shows its real content with no
+                        styling at all:
+                        <span class="d-block mt-1">
+                            @foreach($lookStale as $folder)
+                                <code class="d-block">{{ $folder }}/build</code>
+                            @endforeach
+                        </span>
+                        <span class="d-block mt-1">Taking the look again writes both copies at once.</span>
+                    @elseif($lookInPlace)
+                        The panel has no stylesheet of its own — it wears a copy of the shop system’s
+                        compiled <code>public/build</code>. That copy is refreshed whenever the shop system is
+                        updated above; this is here for the times that is not why it is needed.
+                    @else
+                        Every screen here is serving unstyled HTML because this copy is not there. Taking it
+                        again is safe: the old one is only removed once a whole new one is on the disk.
+                    @endif
+                    <span class="d-block mt-1">Taken from <code>{{ $lookSource }}</code>.</span>
+                </small>
+            </span>
+
+            <form method="POST" action="{{ route('updates.look') }}" class="m-0">
+                @csrf
+                <button type="submit" class="btn btn-sm {{ $lookInPlace && $lookStale === [] ? 'btn-outline-secondary' : 'btn-danger' }}">
+                    Take the look again
+                </button>
+            </form>
+        </div>
+    </div>
+
 @endsection
