@@ -152,4 +152,29 @@
         </div>
     @endforeach
 </div>
+
+    {{--
+        The same clearing an update does, offered on its own. Every shop keeps
+        its own compiled copy of the shared code (Section 3), so code that
+        changed without an update — a file edited on the server, an update that
+        half-failed — leaves them serving something older than what is on disk.
+    --}}
+    <div class="card mt-3">
+        <div class="card-body d-flex flex-wrap justify-content-between align-items-center gap-3">
+            <span>
+                <span class="d-block">Clear every shop’s compiled code</span>
+                <small class="text-secondary">
+                    <code>optimize:clear</code> in each shop — config, routes, views and the cache.
+                    This runs by itself whenever the shop system is updated above; it is here for the
+                    times that is not why it is needed. Nothing is destroyed.
+                </small>
+            </span>
+
+            <form method="POST" action="{{ route('updates.clear-shops') }}" class="m-0">
+                @csrf
+                <button type="submit" class="btn btn-sm btn-outline-secondary">Clear them all</button>
+            </form>
+        </div>
+    </div>
+
 @endsection

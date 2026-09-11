@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\ShopControls;
 use App\Services\Updater;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -86,5 +87,31 @@ class UpdateController extends Controller
             $fields['checkout'] === 'panel' ? 'The panel' : 'The shop system',
             $done['now'], $done['was'],
         ));
+    }
+
+    /**
+     * Clear every shop's compiled code, without updating anything.
+     *
+     * This already happens as part of updating the shop system. It is offered
+     * on its own because the automatic run is not the only time it is needed —
+     * an update that half-failed, a file changed on the server — and because
+     * "do they all need it?" is how the question actually gets asked.
+     */
+    public function clearShops(ShopControls $controls): RedirectResponse
+    {
+        $done = $controls->clearEveryShop();
+
+        if ($done['cleared'] === 0 && $done['stubborn'] === []) {
+            return back()->with('warning', 'There are no shops to clear.');
+        }
+
+        $said = trans_choice(':count shop|:count shops', $done['cleared'])
+            .' threw away what they had compiled.';
+
+        return back()->with(
+            $done['stubborn'] === [] ? 'success' : 'warning',
+            $done['stubborn'] === [] ? $said : $said.' These could not be cleared and may still be serving the '
+                .'old code: '.implode(', ', $done['stubborn']).'.',
+        );
     }
 }

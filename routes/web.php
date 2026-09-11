@@ -76,6 +76,11 @@ Route::middleware('auth')->group(function () {
         // be unreachable at the exact moment it is the last copy.
         ->withTrashed()->name('customers.backup.download');
 
+    // What a shop compiled from code that has since changed. The one command
+    // the panel runs on a shop for its own sake — see ShopControls.
+    Route::post('customers/{customer}/clear', [CustomerController::class, 'clearCompiledCode'])
+        ->name('customers.clear');
+
     // Section 3's other half: one codebase updated once leaves every shop's
     // database behind until somebody runs its migrations.
     Route::post('customers/{customer}/migrate', [CustomerController::class, 'migrate'])
@@ -95,6 +100,10 @@ Route::middleware('auth')->group(function () {
     // When the branch a checkout follows has been merged and deleted, which is
     // the ordinary end of a branch and left Updates unable to say anything.
     Route::post('updates/branch', [UpdateController::class, 'moveBranch'])->name('updates.branch');
+
+    // The same clearing an update does, on its own, for when the update is not
+    // the reason it is needed.
+    Route::post('updates/clear-shops', [UpdateController::class, 'clearShops'])->name('updates.clear-shops');
 
     /*
      * Who may sign in. Not under a customer, because an operator belongs to the

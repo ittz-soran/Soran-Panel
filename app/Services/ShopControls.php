@@ -96,6 +96,71 @@ class ShopControls
     }
 
     /**
+     * Throw away what one shop compiled from the shared code.
+     *
+     * `optimize:clear`, which is config, routes, views, events and the cache
+     * together — Section 3 gives every shop its own `bootstrap/cache`, so each
+     * one holds its own compiled copy of code that has since changed.
+     *
+     * This already happens to every shop as part of updating the shop system.
+     * It is here as well because the automatic run is not the only time it is
+     * needed: an update that half-failed, a file edited on the server, a shop
+     * provisioned while the shared code was mid-change. Until now the answer to
+     * all of those was a terminal.
+     *
+     * ⚠️ **It is the ONE command the panel runs on a shop for its own sake**,
+     * and that is deliberate. A box that runs any artisan command on a
+     * customer's install is remote code execution on somebody else's shop,
+     * reachable by anybody who gets into this panel — a far larger hole than
+     * anything else here, and not something a typed confirmation makes safe.
+     * Section 7 is a list of named things for the same reason. What the panel
+     * runs on a shop it runs because there is a button for it, and every button
+     * is in that list.
+     *
+     * @return array{ok: bool, said: string}
+     */
+    public function clearCompiledCode(Customer $customer): array
+    {
+        $ok = $this->writer->clearCache($customer);
+
+        Action::record('shop.cache_cleared', $customer, ['ok' => $ok]);
+
+        return ['ok' => $ok, 'said' => $ok
+            ? "{$customer->name} has thrown away everything it had compiled. The next page it serves is built "
+                .'from the code that is there now.'
+            : "{$customer->name} could not be cleared — the panel could not run its artisan. If its folder is "
+                .'gone, take it on again; otherwise look at the folder on the server.'];
+    }
+
+    /**
+     * The same, for every shop at once.
+     *
+     * The shape the question is actually asked in after an update — "do they
+     * all need it?" — and doing them one at a time is how the third one gets
+     * forgotten. Nothing stops at the first failure: a shop whose folder has
+     * gone must not prevent the other five being cleared.
+     *
+     * @return array{cleared: int, stubborn: list<string>}
+     */
+    public function clearEveryShop(): array
+    {
+        $cleared = 0;
+        $stubborn = [];
+
+        foreach (Customer::all() as $customer) {
+            if ($this->writer->clearCache($customer)) {
+                $cleared++;
+            } else {
+                $stubborn[] = $customer->name;
+            }
+        }
+
+        Action::record('shops.cache_cleared', null, ['cleared' => $cleared, 'stubborn' => $stubborn]);
+
+        return ['cleared' => $cleared, 'stubborn' => $stubborn];
+    }
+
+    /**
      * A backup of one shop, now, because somebody asked — Section 7.
      *
      * The panel already takes one before migrating a shop and before removing

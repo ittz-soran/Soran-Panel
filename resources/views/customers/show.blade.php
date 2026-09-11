@@ -530,6 +530,27 @@
         </li>
 
         {{--
+            The one command the panel runs on a shop for its own sake, and the
+            only one it will ever offer — see ShopControls::clearCompiledCode
+            for why there is no box to type a command into.
+        --}}
+        <li class="list-group-item d-flex flex-wrap justify-content-between align-items-center gap-2">
+            <span>
+                <span class="d-block">Throw away what it compiled</span>
+                <small class="text-secondary">
+                    Its own <code>optimize:clear</code> — config, routes, views and the cache together.
+                    This already runs on every shop when the shop system is updated; press it when a shop
+                    is serving something older than the code on disk. Nothing is destroyed.
+                </small>
+            </span>
+
+            <form method="POST" action="{{ route('customers.clear', $customer) }}" class="m-0">
+                @csrf
+                <button type="submit" class="btn btn-sm btn-outline-secondary">Clear it</button>
+            </form>
+        </li>
+
+        {{--
             Section 3's other half. Updating the shared code once is the whole
             point of one codebase; every shop's database is behind until this
             is run for it, and until now there was nothing to press.
