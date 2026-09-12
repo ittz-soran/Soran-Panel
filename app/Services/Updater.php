@@ -229,6 +229,36 @@ class Updater
                     .'refreshed, so the panel’s own screens may not match their stylesheet — run '
                     .'`php artisan panel:assets`. '.$e->getMessage();
             }
+
+            /*
+             * And every shop's own copy of that same build — ShopAssets.
+             *
+             * The clear above throws away what each shop COMPILED from the old
+             * code. It does not touch what each shop was GIVEN: a copy of
+             * public/build, made when the shop was provisioned and never
+             * replaced since. So a pull moved every shop's markup and left
+             * every shop's stylesheet where it was, and because a shop reads
+             * its manifest from its own folder, nothing 404s and nothing
+             * complains — the page just quietly stops styling anything written
+             * after the copy.
+             *
+             * Here for the same reason the cache clear is here and migrating is
+             * not: no database is opened, no data is touched, and the old copy
+             * is only removed once the new one is whole. This is the moment the
+             * drift begins, so it is the moment to close it.
+             */
+            try {
+                $assets = app(ShopAssets::class)->refreshEvery();
+
+                if ($assets['stubborn'] !== []) {
+                    $warnings[] = 'These shops are still serving their old stylesheet, so screens added by this '
+                        .'update may not be styled for them: '.implode('; ', $assets['stubborn']).'.';
+                }
+            } catch (RuntimeException $e) {
+                $warnings[] = 'The shop system is updated, but no shop’s stylesheet was replaced, so screens '
+                    .'added by this update may not be styled for them — run `php artisan shops:assets`. '
+                    .$e->getMessage();
+            }
         }
 
         $after = $checkout->state();

@@ -2,8 +2,7 @@
 
 namespace App\Services;
 
-use Illuminate\Support\Facades\File;
-use RuntimeException;
+use App\Support\BuildFolder;
 
 /**
  * The look the panel borrows — PANEL_DOC Section 10.
@@ -23,10 +22,10 @@ use RuntimeException;
  * panel serving unstyled HTML with nothing on screen to say why. It happened on
  * the live panel exactly that way.
  *
- * So `refresh()` does the same job in the order that cannot lose: read the
- * source and refuse if it is not a finished build, copy it in beside the old one
- * under another name, and only then swap the two with a rename. A failure before
- * the swap leaves the panel exactly as it was, still styled.
+ * The order that cannot lose lives in `BuildFolder`, because the shops have the
+ * same problem with the same source and must not have a second copy of the
+ * dangerous part. What is this class's own is *which* folders the panel wears:
+ * its own `public/`, and whatever under public_html is serving it.
  */
 class BorrowedLook
 {
@@ -39,36 +38,17 @@ class BorrowedLook
      */
     public function source(): string
     {
-        return dirname((string) config('panel.shops.shared_artisan')).'/public/build';
+        return BuildFolder::shopSystem();
     }
 
     /**
      * Why the source cannot be used, if it cannot.
      *
-     * A folder of the right name is not a build. The copy that broke the live
-     * panel would have passed an `is_dir` check and failed everything after it.
-     *
      * @return list<string>
      */
     public function problems(?string $source = null): array
     {
-        $source = $source ?? $this->source();
-
-        if (! is_dir($source)) {
-            return ["There is no [{$source}]."];
-        }
-
-        $problems = [];
-
-        if (! is_file($source.'/manifest.json')) {
-            $problems[] = "[{$source}] has no manifest.json, so it is a folder rather than a finished build.";
-        }
-
-        if (glob($source.'/assets/*.css') === []) {
-            $problems[] = "[{$source}] has no stylesheet in assets/, so copying it would change nothing.";
-        }
-
-        return $problems;
+        return BuildFolder::problems($source ?? $this->source());
     }
 
     /**
@@ -99,11 +79,17 @@ class BorrowedLook
      * and the panel answers with a page explaining itself. This one is silent,
      * and it looks from the outside like the panel is broken.
      *
+     * ⚠️ A shop's copy fails differently and is NOT found here — see
+     * `ShopAssets::behind()`. A shop reads its manifest from its own public
+     * folder, so an old copy is internally consistent: nothing 404s, the page
+     * is fully styled, and it is styled by last month's stylesheet. Silent in a
+     * way this one is not.
+     *
      * @return list<string>
      */
     public function stale(): array
     {
-        $named = $this->filesNamedBy(public_path('build/manifest.json'));
+        $named = BuildFolder::filesNamedBy(public_path('build/manifest.json'));
 
         if ($named === []) {
             return [];
@@ -122,44 +108,6 @@ class BorrowedLook
         }
 
         return $stale;
-    }
-
-    /**
-     * Every file a Vite manifest names — the entries and the stylesheets they pull.
-     *
-     * @return list<string>
-     */
-    private function filesNamedBy(string $manifest): array
-    {
-        if (! is_file($manifest)) {
-            return [];
-        }
-
-        $read = json_decode((string) file_get_contents($manifest), true);
-
-        if (! is_array($read)) {
-            return [];
-        }
-
-        $files = [];
-
-        foreach ($read as $entry) {
-            if (! is_array($entry)) {
-                continue;
-            }
-
-            if (isset($entry['file']) && is_string($entry['file'])) {
-                $files[] = $entry['file'];
-            }
-
-            foreach ((array) ($entry['css'] ?? []) as $css) {
-                if (is_string($css)) {
-                    $files[] = $css;
-                }
-            }
-        }
-
-        return array_values(array_unique($files));
     }
 
     /**
@@ -201,76 +149,22 @@ class BorrowedLook
      *
      * @return list<string> the folders written, in the order they were written
      *
-     * @throws RuntimeException before anything is touched, if the source is unusable
+     * @throws \RuntimeException before anything is touched, if the source is unusable
      */
     public function refresh(?string $source = null): array
     {
         $source = $source === null || $source === '' ? $this->source() : rtrim($source, '/');
 
-        if (($problems = $this->problems($source)) !== []) {
-            throw new RuntimeException(implode(' ', $problems).' Nothing was changed.');
+        if (($problems = BuildFolder::problems($source)) !== []) {
+            throw new \RuntimeException(implode(' ', $problems).' Nothing was changed.');
         }
 
-        $written = [$this->replace($source, public_path('build'))];
+        $written = [BuildFolder::replace($source, public_path('build'))];
 
         foreach ($this->published() as $folder) {
-            $written[] = $this->replace($source, $folder.'/build');
+            $written[] = BuildFolder::replace($source, $folder.'/build');
         }
 
         return $written;
-    }
-
-    /**
-     * Put a copy of `$source` at `$target`, without ever leaving nothing there.
-     *
-     * Copy in beside the old one, check the copy arrived, then two renames — so
-     * the old build is only removed once the new one is on the disk and whole.
-     * The only moment the panel has no build is between those two renames.
-     */
-    private function replace(string $source, string $target): string
-    {
-        $staging = $target.'.incoming';
-        $previous = $target.'.previous';
-
-        // Leavings from a run that died half way. Deleting these is safe in a
-        // way deleting $target is not: nothing serves them.
-        File::deleteDirectory($staging);
-        File::deleteDirectory($previous);
-
-        if (! File::copyDirectory($source, $staging)) {
-            File::deleteDirectory($staging);
-
-            throw new RuntimeException("Could not copy the build into [{$staging}]. Nothing was changed.");
-        }
-
-        if (! is_file($staging.'/manifest.json')) {
-            File::deleteDirectory($staging);
-
-            throw new RuntimeException(
-                "The copy at [{$staging}] arrived without its manifest.json. Nothing was changed.",
-            );
-        }
-
-        if (is_dir($target) && ! @rename($target, $previous)) {
-            File::deleteDirectory($staging);
-
-            throw new RuntimeException("Could not move the old build at [{$target}] aside. Nothing was changed.");
-        }
-
-        if (! @rename($staging, $target)) {
-            // The one path where something has already been taken away. Put it
-            // back rather than leaving the panel with no look at all.
-            if (is_dir($previous)) {
-                @rename($previous, $target);
-            }
-
-            File::deleteDirectory($staging);
-
-            throw new RuntimeException("Could not put the new build at [{$target}]. The old one is still there.");
-        }
-
-        File::deleteDirectory($previous);
-
-        return $target;
     }
 }

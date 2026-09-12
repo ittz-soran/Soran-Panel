@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Services\BorrowedLook;
+use App\Services\ShopAssets;
 use App\Services\ShopControls;
 use App\Services\Updater;
 use Illuminate\Http\RedirectResponse;
@@ -21,7 +22,7 @@ use Throwable;
  */
 class UpdateController extends Controller
 {
-    public function index(Request $request, Updater $updater, BorrowedLook $look): View
+    public function index(Request $request, Updater $updater, BorrowedLook $look, ShopAssets $assets): View
     {
         $asked = $request->boolean('check');
 
@@ -40,6 +41,13 @@ class UpdateController extends Controller
             // an older copy than the manifest names. Nothing throws, every
             // stylesheet 404s, and the panel looks broken for no stated reason.
             'lookStale' => $look->stale(),
+
+            // And the same question asked of the SHOPS, which is a different
+            // failure with a different symptom — see ShopAssets. A shop wearing
+            // an old copy does not 404 and does not look broken; it looks fine
+            // and quietly stops styling anything added since the copy was made.
+            // Nothing could see it, which is why it is on a screen now.
+            'shopsBehind' => $assets->behind(),
         ]);
     }
 
@@ -121,6 +129,37 @@ class UpdateController extends Controller
             'The panel is wearing the shop system’s compiled look again — %s.',
             implode(' and ', $written),
         ));
+    }
+
+    /**
+     * Hand every shop the stylesheet the shared codebase is holding.
+     *
+     * Its own action for the same reason `refreshLook` is: a shop wearing last
+     * month's stylesheet is running perfectly current code, so the update
+     * button looks at it and correctly says there is nothing waiting. This
+     * happens automatically when the shop system is updated; this is for every
+     * shop that fell behind before it did, and for a pull done in a terminal.
+     */
+    public function refreshShopAssets(ShopAssets $assets): RedirectResponse
+    {
+        try {
+            $done = $assets->refreshEvery();
+        } catch (Throwable $e) {
+            return back()->with('warning', $e->getMessage());
+        }
+
+        if ($done['written'] === [] && $done['stubborn'] === []) {
+            return back()->with('success', 'Every shop is already wearing this build.');
+        }
+
+        $said = trans_choice(':count shop|:count shops', count($done['written']))
+            .' are wearing the shop system’s compiled look now.';
+
+        return back()->with(
+            $done['stubborn'] === [] ? 'success' : 'warning',
+            $done['stubborn'] === [] ? $said : $said.' These could not be written and are still serving their '
+                .'old stylesheet: '.implode('; ', $done['stubborn']).'.',
+        );
     }
 
     /**
