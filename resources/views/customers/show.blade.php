@@ -671,10 +671,11 @@
                     :confirm="$customer->host"
                     :confirmLabel="'Type '.$customer->host.' to let it go'">
                     <p class="small text-secondary">
-                        Takes this record off the panel and <strong>destroys nothing</strong>. The
-                        database <code>{{ $customer->database_name }}</code> and every folder stay
-                        exactly as they are, because another shop is using them. Its licences and
-                        payments stay readable at this same address.
+                        Removes this shop's subdomain, its DNS record and its folders — everything it
+                        owns on its own — and <strong>keeps the database</strong>
+                        <code>{{ $customer->database_name }}</code> and its user, because another shop
+                        is standing on them. That is the one step Remove would have taken and this one
+                        will not. Its licences and payments stay readable at this same address.
                     </p>
                     <input type="text" name="why" class="form-control form-control-sm mb-2"
                            placeholder="Why, for the record (optional)" maxlength="255">

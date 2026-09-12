@@ -134,7 +134,7 @@ class ShopRemover
     }
 
     /**
-     * Let go of the record without touching anything it names.
+     * Take the record and everything it owns ALONE, and keep only what is shared.
      *
      * The other half of the guard above, and it has to exist or the guard is a
      * dead end: a duplicate row that cannot be removed and cannot be tidied
@@ -142,23 +142,87 @@ class ShopRemover
      * deletes it from the database by hand — which is the dangerous way, the
      * same argument Section 7 already made about never removing anything.
      *
-     * So this is the tail of `remove()` and none of its teardown: marked ended,
-     * written down, soft-deleted. No dump is taken, because nothing is being
-     * destroyed — the database and the folders stay exactly where they are, in
-     * use by whoever else names them.
+     * **A first version of this destroyed nothing at all, and that was wrong.**
+     * Taking on a shop reuses the database and its user and NOTHING else: it
+     * takes a new short name, so `paths($short)` gives it new folders, and
+     * `refuseIfAnythingIsInTheWay()` guarantees they are not somebody's. The old
+     * record's subdomain, DNS record and folders therefore belong to nobody but
+     * it. Leaving them is not caution — it is the litter this class was written
+     * to stop, and `refuseIfAnythingIsInTheWay` means that litter is also what
+     * blocks the name being used again.
+     *
+     * So this is `remove()` with exactly one step left out, and it names the
+     * step: the database and its user stay because another record is standing
+     * on them. Everything else goes, in the same order and with the same rule —
+     * teardown never stops half-way, because a shop with no folder and a live
+     * subdomain is worse than either.
+     *
+     * No dump is taken, and that is not an oversight. `remove()` dumps because
+     * it is about to drop the database; here the database is the one thing that
+     * survives untouched, and a dump of it would be a copy of a thing that is
+     * not going anywhere.
+     *
+     * @return array{kept: string, done: list<string>, left: list<string>}
      */
-    public function retire(Customer $customer, ?string $why = null): void
+    public function retire(Customer $customer, ?string $why = null): array
     {
+        $done = [];
+        $left = [];
+
+        $kept = sprintf(
+            'the database [%s] and its user were KEPT — %s is using them',
+            $customer->database_name,
+            $this->whoElseUses($customer) ?? 'another record',
+        );
+
+        $left = [...$left, ...$this->dns->remove($customer->host)];
+        $done[] = $this->dns->isAutomatic()
+            ? 'the DNS record was removed'
+            : 'the DNS record is yours to remove — the panel does not publish names here';
+
+        $left = [...$left, ...$this->domains->remove($customer->host)];
+        $done[] = $this->domains->isAutomatic()
+            ? "the subdomain {$customer->host} was removed"
+            : "the subdomain {$customer->host} is yours to remove — the panel does not point domains here";
+
+        // Public before private, as in remove(), so a live domain never points
+        // at nothing. And never a folder another record names — the guard above
+        // checks those too, but this is the code that would do the damage.
+        foreach ([$customer->public_path, $customer->shop_home] as $folder) {
+            if ($folder === null || $folder === '') {
+                continue;
+            }
+
+            if (ShopFolder::delete($folder)) {
+                $done[] = "the folder [{$folder}] was deleted";
+            } else {
+                $left[] = "the folder [{$folder}]";
+            }
+        }
+
+        $done[] = $kept;
+
         $customer->update(['status' => Customer::ENDED]);
 
         Action::record('shop.retired', $customer, [
             'why' => $why,
-            'note' => 'The record was let go. Its database and folders were left alone.',
-            'database' => $customer->database_name,
-            'shop_home' => $customer->shop_home,
+            'kept' => $kept,
+            'done' => $done,
+            'left' => $left,
         ]);
 
         $customer->delete();
+
+        return ['kept' => $kept, 'done' => $done, 'left' => $left];
+    }
+
+    /** The record standing on this one's database, by name, for the report. */
+    private function whoElseUses(Customer $customer): ?string
+    {
+        return Customer::withTrashed()
+            ->whereKeyNot($customer->getKey())
+            ->where('database_name', $customer->database_name)
+            ->value('name');
     }
 
     /**

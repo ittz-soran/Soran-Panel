@@ -226,13 +226,19 @@ class RemoveShopTest extends TestCase
     }
 
     /**
-     * The way out of the refusal, or the guard is a dead end.
+     * The way out of the refusal, and it must take the litter with it.
      *
-     * A row that can be neither removed nor tidied away is one somebody deletes
-     * straight out of the database by hand, which is the dangerous way — the
-     * same argument Section 7 already made about never removing anything.
+     * A guard alone would be a dead end: a row that can be neither removed nor
+     * tidied away is one somebody deletes straight out of the database by hand.
+     *
+     * ⚠️ And a version of this that destroyed NOTHING was wrong, which Soran
+     * said plainly — taking on a shop reuses the database and its user and
+     * nothing else, so the old record's subdomain and folders belong to nobody
+     * but it. Leaving them is the litter Section 7 exists to stop, and
+     * `refuseIfAnythingIsInTheWay` means that litter is also what blocks the
+     * name being used again.
      */
-    public function test_letting_go_of_a_record_destroys_nothing(): void
+    public function test_letting_go_takes_everything_the_record_owns_alone(): void
     {
         $old = $this->shop(['name' => 'Halabja Phone'], 'halabjaphone');
 
@@ -247,16 +253,48 @@ class RemoveShopTest extends TestCase
             ->assertRedirect(route('customers.index'))
             ->assertSessionHas('success');
 
-        // The row is gone from the lists…
+        // Everything it owned alone is gone.
+        $this->assertContains('dns:'.$old->host, $this->asked);
+        $this->assertContains('domain:'.$old->host, $this->asked);
+        $this->assertDirectoryDoesNotExist($old->shop_home);
+        $this->assertDirectoryDoesNotExist($old->public_path);
+
+        // ⚠️ And the one thing that is shared was NOT touched.
+        $this->assertNotContains('database:'.$old->database_name, $this->asked);
+        $this->assertFalse(
+            collect($this->asked)->contains(fn ($a) => str_starts_with($a, 'database:')),
+            'Letting go must never drop a database another shop is standing on.',
+        );
+
+        // Hamza is untouched and still trading.
+        $this->assertDirectoryExists($hamza->shop_home);
+        $this->assertSame(Customer::ACTIVE, $hamza->fresh()->status);
+
+        // The row is hidden but readable, and the record says what was kept.
         $this->assertNull(Customer::find($old->id));
-        $this->assertNotNull(Customer::withTrashed()->find($old->id));
         $this->assertSame(Customer::ENDED, Customer::withTrashed()->find($old->id)->status);
 
-        // …and NOTHING was torn down.
-        $this->assertSame([], $this->asked, 'Letting go of a record must not touch a database or a domain.');
-        $this->assertDirectoryExists($old->shop_home);
-        $this->assertDirectoryExists($hamza->shop_home);
-        $this->assertNotNull(Action::where('action', 'shop.retired')->first());
+        $action = Action::where('action', 'shop.retired')->latest('id')->firstOrFail();
+        $this->assertStringContainsString('KEPT', $action->detail['kept']);
+        $this->assertStringContainsString('New Hamza', $action->detail['kept']);
+    }
+
+    /** The screen must say which shop is keeping the database, not just that one is. */
+    public function test_it_names_the_shop_the_database_was_kept_for(): void
+    {
+        $old = $this->shop(['name' => 'Halabja Phone'], 'halabjaphone');
+
+        $this->shop([
+            'name' => 'New Hamza',
+            'host' => 'hamza.soranstore.com',
+            'database_name' => $old->database_name,
+            'status' => Customer::ACTIVE,
+        ], 'hamza');
+
+        $kept = $this->remover()->retire($old->fresh())['kept'];
+
+        $this->assertStringContainsString($old->database_name, $kept);
+        $this->assertStringContainsString('New Hamza', $kept);
     }
 
     /** And it is not a quiet way to hide a live shop. */
