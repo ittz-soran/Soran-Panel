@@ -54,6 +54,10 @@ class CustomerController extends Controller
             // press. The screen asks the same method `remove()` asks, so a
             // button that is enabled is one that will not be refused.
             'removalBlocked' => $customer->trashed() ? null : $remover->blocked($customer),
+
+            // The one part of a shop that can belong to another record, so the
+            // one thing the Remove form asks about. See databaseIsSharedWith().
+            'databaseSharedWith' => $customer->trashed() ? null : $remover->databaseIsSharedWith($customer),
             'removedShopsGoTo' => $remover->whereRemovedShopsAreKept(),
 
             /*

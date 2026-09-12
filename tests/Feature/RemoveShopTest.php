@@ -167,15 +167,15 @@ class RemoveShopTest extends TestCase
      *     New Hamza     | soransto_halabjaphone_shop | hamza.soranstore.com
      *
      * He asked whether removing the old one would destroy the new one. It would
-     * have. `blocked()` asked only whether the shop was trading, and the old row
-     * was not, so the button was open and the teardown would have been faultless
-     * right up to dropping a live shop's data.
+     * have. The only question asked beforehand was whether the shop was
+     * trading, and the old row was not — so the button was open and the
+     * teardown would have been faultless right up to dropping a live shop's
+     * data.
      */
-    public function test_a_shop_sharing_a_database_with_another_cannot_be_removed(): void
+    public function test_the_database_cannot_be_dropped_when_another_shop_stands_on_it(): void
     {
         $old = $this->shop(['name' => 'Halabja Phone'], 'halabjaphone');
 
-        // Taken on: a different name, a different host, the SAME database.
         $this->shop([
             'name' => 'New Hamza',
             'host' => 'hamza.soranstore.com',
@@ -183,36 +183,21 @@ class RemoveShopTest extends TestCase
             'status' => Customer::ACTIVE,
         ], 'hamza');
 
-        $refused = $this->remover()->blocked($old->fresh());
+        $this->assertSame('New Hamza', $this->remover()->databaseIsSharedWith($old->fresh()));
 
-        $this->assertNotNull($refused, 'Removing this would have dropped a live shop’s database.');
+        $refused = $this->refusalOf($old->fresh());
+
+        $this->assertStringContainsString('cannot be dropped', $refused);
         $this->assertStringContainsString('New Hamza', $refused);
-        $this->assertStringContainsString($old->database_name, $refused);
+        $this->assertStringContainsString('Nothing has been changed', $refused);
 
-        // And the refusal is real, not merely advisory.
-        $this->assertStringContainsString('cannot be removed', $this->refusalOf($old->fresh()));
-
-        // Nothing was asked of anything.
+        // Nothing was asked of anything — not even the folders.
         $this->assertSame([], $this->asked);
+        $this->assertDirectoryExists($old->shop_home);
     }
 
-    /** A shared FOLDER is the same fault, and step 4 deletes folders. */
-    public function test_a_shop_sharing_a_folder_with_another_cannot_be_removed(): void
-    {
-        $old = $this->shop(['name' => 'Old'], 'oldshop');
-
-        $this->shop([
-            'name' => 'Newer',
-            'host' => 'newer.soranstore.com',
-            'database_name' => 'soransto_newer_shop',
-            'shop_home' => $old->shop_home,
-        ], 'newer');
-
-        $this->assertStringContainsString('Newer', (string) $this->remover()->blocked($old->fresh()));
-    }
-
-    /** A shop standing alone is still removable — the guard must not block everything. */
-    public function test_a_shop_sharing_nothing_is_still_removable(): void
+    /** A shop standing alone may have its database dropped, as always. */
+    public function test_a_shop_whose_database_is_its_own_is_dropped_as_before(): void
     {
         $alone = $this->shop([], 'alone');
 
@@ -222,23 +207,25 @@ class RemoveShopTest extends TestCase
             'database_name' => 'soransto_unrelated_shop',
         ], 'unrelated');
 
-        $this->assertNull($this->remover()->blocked($alone->fresh()));
+        $this->assertNull($this->remover()->databaseIsSharedWith($alone->fresh()));
+
+        $result = $this->remover()->remove($alone->fresh());
+
+        $this->assertContains('database:'.$alone->database_name, $this->asked);
+        $this->assertNotNull($result['backup']);
     }
 
     /**
-     * The way out of the refusal, and it must take the litter with it.
+     * Removing while keeping the database: everything else still goes.
      *
-     * A guard alone would be a dead end: a row that can be neither removed nor
-     * tidied away is one somebody deletes straight out of the database by hand.
-     *
-     * ⚠️ And a version of this that destroyed NOTHING was wrong, which Soran
-     * said plainly — taking on a shop reuses the database and its user and
-     * nothing else, so the old record's subdomain and folders belong to nobody
-     * but it. Leaving them is the litter Section 7 exists to stop, and
-     * `refuseIfAnythingIsInTheWay` means that litter is also what blocks the
-     * name being used again.
+     * ⚠️ Soran's rule, and it is the whole shape of this screen: the subdomain,
+     * the DNS record and the folders are always this record's own — a taken-on
+     * shop gets a new short name, so `paths($short)` gives it new folders and
+     * `refuseIfAnythingIsInTheWay()` guarantees they are nobody else's. Leaving
+     * them would be the litter this class was written to stop, and that litter
+     * is also what blocks the name being used again.
      */
-    public function test_letting_go_takes_everything_the_record_owns_alone(): void
+    public function test_keeping_the_database_still_takes_the_domain_and_the_folders(): void
     {
         $old = $this->shop(['name' => 'Halabja Phone'], 'halabjaphone');
 
@@ -249,7 +236,7 @@ class RemoveShopTest extends TestCase
             'status' => Customer::ACTIVE,
         ], 'hamza');
 
-        $this->post(route('customers.retire', $old), ['why' => 'Replaced by Hamza'])
+        $this->delete(route('customers.remove', $old), ['database' => 'keep', 'why' => 'Replaced'])
             ->assertRedirect(route('customers.index'))
             ->assertSessionHas('success');
 
@@ -259,52 +246,41 @@ class RemoveShopTest extends TestCase
         $this->assertDirectoryDoesNotExist($old->shop_home);
         $this->assertDirectoryDoesNotExist($old->public_path);
 
-        // ⚠️ And the one thing that is shared was NOT touched.
-        $this->assertNotContains('database:'.$old->database_name, $this->asked);
+        // ⚠️ And the shared database was never touched.
         $this->assertFalse(
             collect($this->asked)->contains(fn ($a) => str_starts_with($a, 'database:')),
-            'Letting go must never drop a database another shop is standing on.',
+            'Keeping the database must never drop it.',
         );
 
         // Hamza is untouched and still trading.
         $this->assertDirectoryExists($hamza->shop_home);
         $this->assertSame(Customer::ACTIVE, $hamza->fresh()->status);
 
-        // The row is hidden but readable, and the record says what was kept.
         $this->assertNull(Customer::find($old->id));
         $this->assertSame(Customer::ENDED, Customer::withTrashed()->find($old->id)->status);
-
-        $action = Action::where('action', 'shop.retired')->latest('id')->firstOrFail();
-        $this->assertStringContainsString('KEPT', $action->detail['kept']);
-        $this->assertStringContainsString('New Hamza', $action->detail['kept']);
     }
 
-    /** The screen must say which shop is keeping the database, not just that one is. */
-    public function test_it_names_the_shop_the_database_was_kept_for(): void
+    /** No dump when the database stays — a copy of something that is not going. */
+    public function test_keeping_the_database_takes_no_dump(): void
     {
-        $old = $this->shop(['name' => 'Halabja Phone'], 'halabjaphone');
+        $customer = $this->shop();
 
-        $this->shop([
-            'name' => 'New Hamza',
-            'host' => 'hamza.soranstore.com',
-            'database_name' => $old->database_name,
-            'status' => Customer::ACTIVE,
-        ], 'hamza');
+        $result = $this->remover()->remove($customer, null, keepDatabase: true);
 
-        $kept = $this->remover()->retire($old->fresh())['kept'];
-
-        $this->assertStringContainsString($old->database_name, $kept);
-        $this->assertStringContainsString('New Hamza', $kept);
+        $this->assertNull($result['backup']);
+        $this->assertStringContainsString('KEPT', implode(' ', $result['done']));
     }
 
-    /** And it is not a quiet way to hide a live shop. */
-    public function test_a_trading_shop_cannot_be_let_go(): void
+    /** The choice is required: neither answer may be assumed. */
+    public function test_the_screen_refuses_a_removal_that_did_not_answer_the_question(): void
     {
-        $trading = $this->shop(['status' => Customer::ACTIVE], 'trading');
+        $customer = $this->shop();
 
-        $this->post(route('customers.retire', $trading))->assertSessionHas('warning');
+        $this->from(route('customers.show', $customer))
+            ->delete(route('customers.remove', $customer))
+            ->assertSessionHasErrors('database');
 
-        $this->assertNotNull(Customer::find($trading->id));
+        $this->assertSame([], $this->asked);
     }
 
     private function shop(array $attributes = [], string $short = 'bazaar'): Customer
@@ -656,7 +632,7 @@ exit(0);
 
         app(DomainMaker::class)->leaves = ['the domain [bazaar.soranstore.com], which cPanel still lists'];
 
-        $this->delete(route('customers.remove', $customer))
+        $this->delete(route('customers.remove', $customer), ['database' => 'drop'])
             ->assertSessionHas('warning', fn (string $said) => str_contains($said, 'left behind'));
 
         $this->get(route('customers.show', $customer))
@@ -744,7 +720,7 @@ exit(0);
             ->assertSee('Remove it for ever')
             ->assertSee('data-confirm-word="bazaar.soranstore.com"', escape: false);
 
-        $this->delete(route('customers.remove', $customer), ['why' => 'closed'])
+        $this->delete(route('customers.remove', $customer), ['why' => 'closed', 'database' => 'drop'])
             ->assertRedirect(route('customers.index'))
             ->assertSessionHas('success', fn (string $said) => str_contains($said, 'has been removed')
                 && str_contains($said, $this->root.'/removed-shops/'));
@@ -771,7 +747,7 @@ exit(0);
 
         $this->remover()->remove($customer);
 
-        $this->delete(route('customers.remove', $customer))->assertNotFound();
+        $this->delete(route('customers.remove', $customer), ['database' => 'drop'])->assertNotFound();
     }
 
     private function rmrf(string $path): void

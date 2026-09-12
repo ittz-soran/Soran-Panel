@@ -70,155 +70,43 @@ class ShopRemover
                 .'and can put the licence straight back.';
         }
 
-        if ($sharer = $this->sharesSomethingWith($customer)) {
-            return $sharer;
-        }
-
         return null;
     }
 
     /**
-     * Another shop standing on the same database or the same folder.
+     * Why this shop's database may not be dropped, or null when it may.
      *
-     * ⚠️ **The panel could destroy a live shop by removing a different one, and
-     * this is what stops it. Found before it happened, 2026-09-12.**
+     * ⚠️ **The panel could destroy a live shop by removing a different one.
+     * Caught before it happened, 2026-09-12, because Soran asked first.**
      *
      * Taking on a shop builds a NEW customer around an EXISTING database — that
-     * is the whole point of it, and Section 13 kept Halabja-phone's database for
-     * exactly that purpose. What it leaves behind is two rows naming one
-     * database:
+     * is what it is for, and Section 13 kept Halabja-phone's database so it
+     * could be done. What it leaves is two rows naming one database:
      *
      *     Halabja Phone | soransto_halabjaphone_shop | halabjaphone.soranstore.com
      *     New Hamza     | soransto_halabjaphone_shop | hamza.soranstore.com
      *
-     * Removing the old row runs `drop($customer->database_name, …)` and takes
-     * the live shop's data with it. `blocked()` asked only whether the shop was
-     * trading, and the old row is not trading — so the button was open, and the
-     * teardown would have been faultless right up to destroying somebody's
-     * business.
+     * Removing the old row dropped `$customer->database_name`, and the only
+     * question asked beforehand was whether the shop was trading. The old row
+     * was not, so the button was open and the teardown would have been faultless
+     * right up to destroying somebody's business.
      *
-     * Folders are checked the same way and for the same reason: two records can
-     * point at one `shop_home` just as easily, and step 4 deletes it.
-     *
-     * Trashed rows are included deliberately. A soft-deleted customer's database
-     * has NOT been dropped unless it went through `remove()`, and "retired the
-     * row" is now a thing this panel can do on purpose — so a hidden row is
-     * still a reason not to drop anything.
+     * This is a question about the DATABASE alone, not about removal. The
+     * subdomain, the DNS record and the folders are always this record's own —
+     * a taken-on shop gets a new short name, so `paths($short)` gives it new
+     * folders and `refuseIfAnythingIsInTheWay()` guarantees they are nobody
+     * else's — so those always go. Only the database can be somebody else's,
+     * and when it is, removal keeps it and says so.
      */
-    private function sharesSomethingWith(Customer $customer): ?string
+    public function databaseIsSharedWith(Customer $customer): ?string
     {
-        $others = Customer::withTrashed()
-            ->whereKeyNot($customer->getKey())
-            ->get(['id', 'name', 'database_name', 'shop_home', 'public_path']);
-
-        foreach ($others as $other) {
-            $shared = match (true) {
-                filled($customer->database_name) && $other->database_name === $customer->database_name => "the database [{$customer->database_name}]",
-                filled($customer->shop_home) && $other->shop_home === $customer->shop_home => "the folder [{$customer->shop_home}]",
-                filled($customer->public_path) && $other->public_path === $customer->public_path => "the public folder [{$customer->public_path}]",
-                default => null,
-            };
-
-            if ($shared !== null) {
-                return sprintf(
-                    'This cannot be removed: %s shares %s with it, and removing a shop drops its '
-                    .'database and deletes its folders. Doing that here would destroy %s. This is what '
-                    .'taking on a shop leaves behind — two records standing on one database — and the '
-                    .'answer is to retire this record rather than tear anything down.',
-                    $other->name, $shared, $other->name,
-                );
-            }
+        if (blank($customer->database_name)) {
+            return null;
         }
 
-        return null;
-    }
-
-    /**
-     * Take the record and everything it owns ALONE, and keep only what is shared.
-     *
-     * The other half of the guard above, and it has to exist or the guard is a
-     * dead end: a duplicate row that cannot be removed and cannot be tidied
-     * away is one that sits in the list for ever, and somebody eventually
-     * deletes it from the database by hand — which is the dangerous way, the
-     * same argument Section 7 already made about never removing anything.
-     *
-     * **A first version of this destroyed nothing at all, and that was wrong.**
-     * Taking on a shop reuses the database and its user and NOTHING else: it
-     * takes a new short name, so `paths($short)` gives it new folders, and
-     * `refuseIfAnythingIsInTheWay()` guarantees they are not somebody's. The old
-     * record's subdomain, DNS record and folders therefore belong to nobody but
-     * it. Leaving them is not caution — it is the litter this class was written
-     * to stop, and `refuseIfAnythingIsInTheWay` means that litter is also what
-     * blocks the name being used again.
-     *
-     * So this is `remove()` with exactly one step left out, and it names the
-     * step: the database and its user stay because another record is standing
-     * on them. Everything else goes, in the same order and with the same rule —
-     * teardown never stops half-way, because a shop with no folder and a live
-     * subdomain is worse than either.
-     *
-     * No dump is taken, and that is not an oversight. `remove()` dumps because
-     * it is about to drop the database; here the database is the one thing that
-     * survives untouched, and a dump of it would be a copy of a thing that is
-     * not going anywhere.
-     *
-     * @return array{kept: string, done: list<string>, left: list<string>}
-     */
-    public function retire(Customer $customer, ?string $why = null): array
-    {
-        $done = [];
-        $left = [];
-
-        $kept = sprintf(
-            'the database [%s] and its user were KEPT — %s is using them',
-            $customer->database_name,
-            $this->whoElseUses($customer) ?? 'another record',
-        );
-
-        $left = [...$left, ...$this->dns->remove($customer->host)];
-        $done[] = $this->dns->isAutomatic()
-            ? 'the DNS record was removed'
-            : 'the DNS record is yours to remove — the panel does not publish names here';
-
-        $left = [...$left, ...$this->domains->remove($customer->host)];
-        $done[] = $this->domains->isAutomatic()
-            ? "the subdomain {$customer->host} was removed"
-            : "the subdomain {$customer->host} is yours to remove — the panel does not point domains here";
-
-        // Public before private, as in remove(), so a live domain never points
-        // at nothing. And never a folder another record names — the guard above
-        // checks those too, but this is the code that would do the damage.
-        foreach ([$customer->public_path, $customer->shop_home] as $folder) {
-            if ($folder === null || $folder === '') {
-                continue;
-            }
-
-            if (ShopFolder::delete($folder)) {
-                $done[] = "the folder [{$folder}] was deleted";
-            } else {
-                $left[] = "the folder [{$folder}]";
-            }
-        }
-
-        $done[] = $kept;
-
-        $customer->update(['status' => Customer::ENDED]);
-
-        Action::record('shop.retired', $customer, [
-            'why' => $why,
-            'kept' => $kept,
-            'done' => $done,
-            'left' => $left,
-        ]);
-
-        $customer->delete();
-
-        return ['kept' => $kept, 'done' => $done, 'left' => $left];
-    }
-
-    /** The record standing on this one's database, by name, for the report. */
-    private function whoElseUses(Customer $customer): ?string
-    {
+        // Trashed rows count: a soft-deleted customer's database has NOT been
+        // dropped unless it went through a removal that dropped it, and a
+        // removal that kept it is now a thing this panel does on purpose.
         return Customer::withTrashed()
             ->whereKeyNot($customer->getKey())
             ->where('database_name', $customer->database_name)
@@ -227,18 +115,45 @@ class ShopRemover
 
     /**
      * @param  string|null  $why  for the record
-     * @return array{backup: string, done: list<string>, left: list<string>}
+     * @param  bool  $keepDatabase  leave the database and its user alone — the
+     *                              only part of a shop that can belong to
+     *                              another record, and the only choice here
+     * @return array{backup: ?string, done: list<string>, left: list<string>}
      */
-    public function remove(Customer $customer, ?string $why = null): array
+    public function remove(Customer $customer, ?string $why = null, bool $keepDatabase = false): array
     {
         if ($reason = $this->blocked($customer)) {
             throw new RuntimeException($reason);
         }
 
-        // The gate. Throws, and nothing below has run.
-        $backup = $this->keepACopyOfTheirDatabase($customer);
+        /*
+         * The one thing that might not be this shop's to destroy.
+         *
+         * Refused rather than quietly downgraded to keeping it: a person who
+         * asked for the database to go and is told nothing would believe it
+         * had, and would go looking for it in the backup instead of on the
+         * disk. See databaseIsSharedWith().
+         */
+        if (! $keepDatabase && ($sharer = $this->databaseIsSharedWith($customer))) {
+            throw new RuntimeException(sprintf(
+                'The database [%s] cannot be dropped: %s is standing on it, and dropping it would '
+                .'destroy that shop. Remove this one keeping the database instead — its subdomain, '
+                .'DNS record and folders still go. Nothing has been changed.',
+                $customer->database_name, $sharer,
+            ));
+        }
 
-        $done = ["their database was dumped to {$backup}"];
+        /*
+         * The gate, and only when the database is actually going. Throws, and
+         * nothing below has run.
+         *
+         * No dump when it is being kept: `remove()` dumps because it is about
+         * to drop the database, and a copy of a thing that is not going
+         * anywhere is not insurance, it is a second copy to keep in step.
+         */
+        $backup = $keepDatabase ? null : $this->keepACopyOfTheirDatabase($customer);
+
+        $done = $keepDatabase ? [] : ["their database was dumped to {$backup}"];
         $left = [];
 
         // The published name first: a record pointing at a shop being taken
@@ -276,8 +191,16 @@ class ShopRemover
             }
         }
 
-        $left = [...$left, ...$this->databases->drop($customer->database_name, $customer->database_user)];
-        $done[] = "the database [{$customer->database_name}] and its user were dropped";
+        if ($keepDatabase) {
+            $done[] = sprintf(
+                'the database [%s] and its user were KEPT%s',
+                $customer->database_name,
+                ($sharer = $this->databaseIsSharedWith($customer)) ? " — {$sharer} is using them" : '',
+            );
+        } else {
+            $left = [...$left, ...$this->databases->drop($customer->database_name, $customer->database_user)];
+            $done[] = "the database [{$customer->database_name}] and its user were dropped";
+        }
 
         /*
          * The row stays. Section 5: licences and payments outlive a customer,
