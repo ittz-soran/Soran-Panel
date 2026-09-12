@@ -632,11 +632,10 @@
             <span>
                 <span class="d-block">Remove this shop</span>
                 <small class="text-secondary">
-                    Dumps their database and copies it to
-                    <code>{{ $removedShopsGoTo }}</code> first — if that fails, nothing is touched.
-                    Then the DNS record, the subdomain, both folders, and the database and its user.
-                    This customer, every licence and every payment stay on record.
-                    <strong>Nothing here can be undone.</strong>
+                    The DNS record, the subdomain and both folders always go. If the database goes
+                    with them, it is dumped to <code>{{ $removedShopsGoTo }}</code> first and nothing
+                    is touched until that copy has landed. This customer, every licence and every
+                    payment stay on record. <strong>Nothing here can be undone.</strong>
                 </small>
             </span>
 
@@ -648,45 +647,65 @@
                 :reason="$removalBlocked"
                 :confirm="$customer->host"
                 :confirmLabel="'Type '.$customer->host.' to remove it'">
+
+                {{-- The subdomain, the DNS record and the folders always go:
+                     they are this record's own, because a taken-on shop gets a
+                     new short name and refuseIfAnythingIsInTheWay() guarantees
+                     its folders are nobody else's. The DATABASE is the only
+                     part that can belong to another record, so it is the only
+                     thing asked about. --}}
+                <p class="small text-secondary mb-2">
+                    The subdomain <code>{{ $customer->host }}</code>, its DNS record and both folders
+                    go either way. The question is the database.
+                </p>
+
+                @if($databaseSharedWith)
+                    {{-- Not offered at all, rather than offered and refused.
+                         A choice you can pick and then be told off for is a
+                         worse screen than one that never had it. --}}
+                    <div class="alert alert-warning small py-2">
+                        <strong>{{ $databaseSharedWith }}</strong> is standing on the database
+                        <code>{{ $customer->database_name }}</code>, so it stays. Dropping it would
+                        destroy that shop.
+                    </div>
+                    <input type="hidden" name="database" value="keep">
+                @else
+                    <div class="mb-2">
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="database"
+                                   value="drop" id="db-drop" required>
+                            <label class="form-check-label small" for="db-drop">
+                                <strong>Destroy the database too.</strong>
+                                <span class="d-block text-secondary">
+                                    A dump is taken and copied somewhere this cannot reach first.
+                                    Nothing of this shop is left.
+                                </span>
+                            </label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="database"
+                                   value="keep" id="db-keep">
+                            <label class="form-check-label small" for="db-keep">
+                                <strong>Keep the database and its user.</strong>
+                                <span class="d-block text-secondary">
+                                    <code>{{ $customer->database_name }}</code> stays on the account
+                                    for a rebuild later. No dump is taken — nothing is being destroyed.
+                                </span>
+                            </label>
+                        </div>
+                    </div>
+                @endif
+
                 <input type="text" name="why" class="form-control form-control-sm mb-2"
                        placeholder="Why, for the record (optional)" maxlength="255">
             </x-danger-form>
         </li>
 
-        {{-- The way out of the refusal above.
-
-             A record sharing its database with a live shop cannot be removed —
-             removing it would drop that shop's data. Without this it could not
-             be tidied away either, and a row that can be neither removed nor
-             retired is one somebody eventually DELETEs straight out of the
-             database, which is the dangerous way. Offered only when removal is
-             actually blocked, so it never becomes the quiet alternative to a
-             removal that ought to be thought about. --}}
-        @if($removalBlocked && ! $customer->trashed())
-            <li class="list-group-item">
-                <x-danger-form
-                    :action="route('customers.retire', $customer)"
-                    method="POST"
-                    label="Let go of this record"
-                    :confirm="$customer->host"
-                    :confirmLabel="'Type '.$customer->host.' to let it go'">
-                    <p class="small text-secondary">
-                        Removes this shop's subdomain, its DNS record and its folders — everything it
-                        owns on its own — and <strong>keeps the database</strong>
-                        <code>{{ $customer->database_name }}</code> and its user, because another shop
-                        is standing on them. That is the one step Remove would have taken and this one
-                        will not. Its licences and payments stay readable at this same address.
-                    </p>
-                    <input type="text" name="why" class="form-control form-control-sm mb-2"
-                           placeholder="Why, for the record (optional)" maxlength="255">
-                </x-danger-form>
-            </li>
-        @endif
     </ul>
     <div class="card-footer small text-secondary">
         The panel may never write to this shop’s business tables or hold the private key — Section 7.
-        It may drop this shop’s database, and only through Remove, and only after a dump it has
-        checked landed somewhere that survives.
+        It may drop this shop’s database, and only through Remove, only when you have asked for it,
+        and only after a dump it has checked landed somewhere that survives.
     </div>
 </div>
 @endif

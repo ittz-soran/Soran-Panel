@@ -6,6 +6,7 @@ use App\Models\Customer;
 use App\Services\ShopRemover;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 use Throwable;
 
 /**
@@ -20,10 +21,26 @@ class RemoveShopController extends Controller
 {
     public function destroy(Request $request, Customer $customer, ShopRemover $remover): RedirectResponse
     {
-        $request->validate(['why' => ['nullable', 'string', 'max:255']]);
+        $fields = $request->validate([
+            'why' => ['nullable', 'string', 'max:255'],
+
+            /*
+             * The one question this screen asks, and it is required on purpose.
+             *
+             * A default would be wrong either way round: defaulting to dropping
+             * makes destroying a shared database one careless press away, and
+             * defaulting to keeping quietly leaves a database behind when
+             * somebody meant to be rid of it. So it is asked, and answered.
+             */
+            'database' => ['required', Rule::in(['drop', 'keep'])],
+        ]);
 
         try {
-            $result = $remover->remove($customer, $request->input('why'));
+            $result = $remover->remove(
+                $customer,
+                $fields['why'] ?? null,
+                keepDatabase: $fields['database'] === 'keep',
+            );
         } catch (Throwable $e) {
             // Every refusal inside ShopRemover says what it did not do, and it
             // is always "nothing". Back to the shop's own page, which is still
@@ -31,7 +48,9 @@ class RemoveShopController extends Controller
             return back()->with('warning', $e->getMessage());
         }
 
-        $said = "{$customer->name} has been removed. Their last backup is at {$result['backup']}.";
+        $said = $result['backup'] === null
+            ? "{$customer->name} has been removed. Its subdomain, DNS record and folders are gone."
+            : "{$customer->name} has been removed. Their last backup is at {$result['backup']}.";
 
         if ($result['left'] !== []) {
             return redirect()->route('customers.show', $customer)->with('warning', $said
@@ -40,40 +59,6 @@ class RemoveShopController extends Controller
 
         // The list, not the shop's page: the shop is gone, and landing on a
         // page that says so is a better answer than one that still looks live.
-        return redirect()->route('customers.index')->with('success', $said);
-    }
-
-    /**
-     * Let go of a record without destroying what it names.
-     *
-     * Here rather than on CustomerController because it is the answer to a
-     * refusal this controller gives: a record sharing its database with a live
-     * shop cannot be removed, and without this it could not be tidied away
-     * either — which is a dead end, and dead ends get solved with a DELETE
-     * typed straight into the database.
-     *
-     * Deliberately NOT offered as an easier removal. It is only reachable when
-     * the shop is not trading, exactly like removal, so it cannot become the
-     * way somebody quietly hides a live customer.
-     */
-    public function retire(Request $request, Customer $customer, ShopRemover $remover): RedirectResponse
-    {
-        $request->validate(['why' => ['nullable', 'string', 'max:255']]);
-
-        if (in_array($customer->status, [Customer::ACTIVE, Customer::TRIAL], true)) {
-            return back()->with('warning', 'Suspend it first. Letting go of a trading shop\'s record '
-                .'would leave a live till with nothing on the panel accounting for it.');
-        }
-
-        $result = $remover->retire($customer, $request->input('why'));
-
-        $said = "{$customer->name} has been let go. ".ucfirst($result['kept']).'.';
-
-        if ($result['left'] !== []) {
-            return redirect()->route('customers.show', $customer)->with('warning', $said
-                .' These were left behind and need doing by hand: '.implode('; ', $result['left']).'.');
-        }
-
         return redirect()->route('customers.index')->with('success', $said);
     }
 }
