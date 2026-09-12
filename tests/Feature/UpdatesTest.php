@@ -549,6 +549,53 @@ class UpdatesTest extends TestCase
         $this->assertSame('"what it is wearing"', file_get_contents(public_path('build/manifest.json')));
     }
 
+    /**
+     * Soran's server on 2026-09-12, as a test.
+     *
+     * The screen refused an update and offered `git checkout -- public/build`.
+     * The blocking file was a DELETED `public/build.zip` — a sibling of that
+     * folder, not inside it — so the command named would have restored nothing
+     * while looking exactly as though it should. The advice must name the paths
+     * git will really act on.
+     */
+    public function test_it_gives_a_command_naming_the_actual_blocking_file(): void
+    {
+        $this->commitOnOrigin('Something to pull');
+
+        // A tracked file, deleted on the server. Not under public/build.
+        unlink($this->clone.'/public/build/manifest.json');
+        rename($this->clone.'/README.md', $this->clone.'/README.moved');
+        unlink($this->clone.'/README.moved');
+
+        $this->swapUpdaterFor('shop_system');
+
+        $page = $this->get(route('updates', ['check' => 1]));
+
+        $page->assertOk()
+            ->assertSee('git checkout --', false)
+            ->assertSee('README.md');
+
+        // And the old sentence, which pointed at a folder rather than the file,
+        // must not be what it says.
+        $page->assertDontSee('If these are all under');
+    }
+
+    /** A file git has never seen gets the other instruction, not a useless one. */
+    public function test_an_untracked_file_is_not_offered_git_checkout(): void
+    {
+        $this->commitOnOrigin('Something to pull');
+
+        file_put_contents($this->clone.'/notes-from-soran.txt', "mine\n");
+
+        $this->swapUpdaterFor('shop_system');
+
+        $this->get(route('updates', ['check' => 1]))
+            ->assertOk()
+            ->assertSee('notes-from-soran.txt')
+            ->assertSee('git checkout') // the heading text explains it will NOT touch them
+            ->assertSee('files git has never seen');
+    }
+
     public function test_updating_something_that_is_not_a_checkout_is_refused(): void
     {
         $this->post(route('updates.store'), ['checkout' => 'the-moon'])

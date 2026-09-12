@@ -113,6 +113,14 @@ class Checkout
             $changed[] = [
                 'status' => $this->inPlainWords(substr($line, 0, 2)),
                 'path' => trim($path, '"'),
+
+                // Whether `git checkout --` can undo this one. It restores a
+                // tracked file that was changed or deleted; it does nothing at
+                // all to a file git has never seen, which has to be moved aside
+                // or committed instead. The screen needs to tell those apart —
+                // offering one command for both sends somebody away to run
+                // something that quietly does nothing.
+                'restorable' => trim(substr($line, 0, 2)) !== '??',
             ];
         }
 
