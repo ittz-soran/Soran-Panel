@@ -120,16 +120,41 @@
                                         </div>
                                     @endif
 
-                                    {{-- The overwhelmingly common cause, and the one the panel
-                                         cannot safely fix for you: build/ is committed in the shop
-                                         system now, so a build uploaded or extracted on the server
-                                         shows up here as changed tracked files. --}}
-                                    <div class="mt-2">
-                                        If these are all under <code>public/build</code>, they are the
-                                        compiled assets: those are committed now, so the copy in git is
-                                        the one to keep. <code>git checkout -- public/build</code> in
-                                        that folder puts it back and lets the update run.
-                                    </div>
+                                    {{-- The command with the REAL paths in it, not a sentence
+                                         about a folder.
+
+                                         The first version of this said "if these are all under
+                                         public/build … git checkout -- public/build". Soran hit it
+                                         with a deleted `public/build.zip`, which is a SIBLING of
+                                         that folder and not inside it — so the suggested command
+                                         would have restored nothing while looking as though it
+                                         should. Naming the paths git will actually act on is the
+                                         only version of this that cannot mislead. --}}
+                                    @php
+                                        $restorable = array_values(array_filter(
+                                            $it['uncommitted'], fn ($c) => $c['restorable'] ?? false
+                                        ));
+                                        $untracked = array_values(array_filter(
+                                            $it['uncommitted'], fn ($c) => ! ($c['restorable'] ?? false)
+                                        ));
+                                    @endphp
+
+                                    @if($restorable !== [])
+                                        <div class="mt-2">
+                                            These were changed or deleted here but git still has them, so the
+                                            copy in git is the one to keep. In <code>{{ $it['path'] }}</code>:
+                                            <pre class="mt-1 mb-0 p-2 bg-body-tertiary rounded small"><code>git checkout -- {{ collect($restorable)->take(20)->pluck('path')->map(fn ($p) => escapeshellarg($p))->implode(' ') }}</code></pre>
+                                        </div>
+                                    @endif
+
+                                    @if($untracked !== [])
+                                        <div class="mt-2">
+                                            These are files git has never seen, so <code>git checkout</code> will
+                                            not touch them — move them somewhere else, or commit them, whichever
+                                            they deserve:
+                                            <span class="d-block font-monospace mt-1">{{ collect($untracked)->take(20)->pluck('path')->implode(', ') }}</span>
+                                        </div>
+                                    @endif
                                 @endif
                             </div>
                         @endunless
