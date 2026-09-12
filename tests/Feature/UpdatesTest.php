@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Action;
+use App\Models\Customer;
 use App\Models\User;
 use App\Services\Checkout;
 use App\Services\Updater;
@@ -506,6 +507,41 @@ class UpdatesTest extends TestCase
         $this->post(route('updates.store'), ['checkout' => 'shop_system'])->assertSessionHas('success');
 
         $this->assertSame('"the second build"', file_get_contents(public_path('build/manifest.json')));
+    }
+
+    /**
+     * ⚠️ And every SHOP's copy of that same build — ShopAssets.
+     *
+     * The clear that already happened here throws away what each shop COMPILED
+     * from the old code. It does not touch what each shop was GIVEN: a copy of
+     * public/build made when the shop was provisioned. For months nothing did,
+     * and because a shop reads its manifest from its own folder the result was
+     * silent — no 404, no exception, a page that renders in full and quietly
+     * stops styling anything written since the copy was made.
+     */
+    public function test_updating_the_shop_system_gives_every_shop_the_new_build(): void
+    {
+        // A shop wearing what `shop:provision` handed it.
+        $public = $this->root.'/public_html/halabja';
+        mkdir($public.'/build/assets', 0777, true);
+        file_put_contents($public.'/build/manifest.json', '"the first build"');
+
+        Customer::factory()->create(['name' => 'Halabja Phone', 'public_path' => $public]);
+
+        // And the shop system's next commit rebuilds the front end.
+        file_put_contents($this->origin.'/public/build/manifest.json', '"the second build"');
+        $this->commitOnOrigin('A rebuilt front end', 'public/build/assets/app-second.css');
+
+        $this->swapUpdaterFor('shop_system');
+
+        // Not asserted green: this shop has no artisan, so clearing its
+        // compiled code warns — and that is the point being made. The assets
+        // are copied by the panel itself and do not need the shop to answer.
+        $this->post(route('updates.store'), ['checkout' => 'shop_system'])
+            ->assertRedirect(route('updates'));
+
+        $this->assertSame('"the second build"', file_get_contents($public.'/build/manifest.json'),
+            'The shop is running the new code in the old stylesheet, which is the whole bug.');
     }
 
     /**

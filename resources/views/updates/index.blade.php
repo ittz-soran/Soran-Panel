@@ -282,4 +282,60 @@
         </div>
     </div>
 
+    {{--
+        The same question asked of the shops, and it is NOT the same failure.
+
+        The card above is loud: the panel's manifest names a file the served
+        folder has not got, every stylesheet 404s, and the panel is obviously
+        broken. A shop reads its manifest from its own folder, so an old copy
+        agrees with itself — nothing 404s, nothing throws, the page renders in
+        full and looks correct. It is simply wearing the stylesheet it was given
+        the day it was provisioned, and anything drawn since has nothing to
+        style it.
+
+        There was no way to see that from anywhere, which is how it went on for
+        months and was finally found by a shopkeeper saying four charts looked
+        like black boxes. So it gets a card, and the card counts.
+    --}}
+    <div class="card mt-3 {{ $shopsBehind === [] ? '' : 'border-warning' }}">
+        <div class="card-body d-flex flex-wrap justify-content-between align-items-center gap-3">
+            <span>
+                <span class="d-block">
+                    The look each shop is wearing
+                    @if($shopsBehind !== [])
+                        <span class="badge text-bg-warning ms-1">{{ count($shopsBehind) }} behind</span>
+                    @endif
+                </span>
+                <small class="text-secondary">
+                    @if($shopsBehind === [])
+                        Every shop’s <code>public/build</code> is the one the shared codebase is holding.
+                        Each shop wears its own copy, made when it was provisioned; this is refreshed
+                        whenever the shop system is updated above.
+                    @else
+                        These shops have a copy of <code>public/build</code> older than the shared codebase’s.
+                        Their screens are not broken and will not look broken — they are styled by an
+                        older stylesheet, so anything added to the system since their copy was made is
+                        unstyled for them:
+                        <span class="d-block mt-1">
+                            @foreach($shopsBehind as $shop)
+                                <code class="d-block">{{ $shop->name }} — {{ $shop->public_path }}/build</code>
+                            @endforeach
+                        </span>
+                        <span class="d-block mt-1">
+                            Safe at any time: no database is opened and no data is touched, and a shop’s old
+                            copy is only removed once a whole new one is on the disk beside it.
+                        </span>
+                    @endif
+                </small>
+            </span>
+
+            <form method="POST" action="{{ route('updates.shop-assets') }}" class="m-0">
+                @csrf
+                <button type="submit" class="btn btn-sm {{ $shopsBehind === [] ? 'btn-outline-secondary' : 'btn-warning' }}">
+                    Give them this build
+                </button>
+            </form>
+        </div>
+    </div>
+
 @endsection

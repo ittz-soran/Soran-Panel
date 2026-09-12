@@ -104,6 +104,8 @@ Route::middleware('auth')->group(function () {
     // The same clearing an update does, on its own, for when the update is not
     // the reason it is needed.
     Route::post('updates/look', [UpdateController::class, 'refreshLook'])->name('updates.look');
+    Route::post('updates/shop-assets', [UpdateController::class, 'refreshShopAssets'])
+        ->name('updates.shop-assets');
     Route::post('updates/clear-shops', [UpdateController::class, 'clearShops'])->name('updates.clear-shops');
 
     /*
