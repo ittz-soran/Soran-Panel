@@ -65,13 +65,15 @@ class RemoveShopController extends Controller
                 .'would leave a live till with nothing on the panel accounting for it.');
         }
 
-        $remover->retire($customer, $request->input('why'));
+        $result = $remover->retire($customer, $request->input('why'));
 
-        return redirect()->route('customers.index')->with('success', sprintf(
-            '%s has been let go from the panel. Its database [%s] and its folders were left exactly '
-            .'as they are — nothing was deleted.',
-            $customer->name,
-            $customer->database_name,
-        ));
+        $said = "{$customer->name} has been let go. ".ucfirst($result['kept']).'.';
+
+        if ($result['left'] !== []) {
+            return redirect()->route('customers.show', $customer)->with('warning', $said
+                .' These were left behind and need doing by hand: '.implode('; ', $result['left']).'.');
+        }
+
+        return redirect()->route('customers.index')->with('success', $said);
     }
 }
