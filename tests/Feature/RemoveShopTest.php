@@ -156,6 +156,119 @@ class RemoveShopTest extends TestCase
      * A shop on disk: both folders, an artisan that can dump itself, and a
      * backup folder with something in it.
      */
+    /**
+     * ⚠️ Soran's panel on 2026-09-12, and the reason this guard exists.
+     *
+     * Taking on a shop builds a new customer around an EXISTING database — that
+     * is what it is for, and Section 13 kept Halabja-phone's database precisely
+     * so it could be done. What it leaves is two rows naming one database:
+     *
+     *     Halabja Phone | soransto_halabjaphone_shop | halabjaphone.soranstore.com
+     *     New Hamza     | soransto_halabjaphone_shop | hamza.soranstore.com
+     *
+     * He asked whether removing the old one would destroy the new one. It would
+     * have. `blocked()` asked only whether the shop was trading, and the old row
+     * was not, so the button was open and the teardown would have been faultless
+     * right up to dropping a live shop's data.
+     */
+    public function test_a_shop_sharing_a_database_with_another_cannot_be_removed(): void
+    {
+        $old = $this->shop(['name' => 'Halabja Phone'], 'halabjaphone');
+
+        // Taken on: a different name, a different host, the SAME database.
+        $this->shop([
+            'name' => 'New Hamza',
+            'host' => 'hamza.soranstore.com',
+            'database_name' => $old->database_name,
+            'status' => Customer::ACTIVE,
+        ], 'hamza');
+
+        $refused = $this->remover()->blocked($old->fresh());
+
+        $this->assertNotNull($refused, 'Removing this would have dropped a live shop’s database.');
+        $this->assertStringContainsString('New Hamza', $refused);
+        $this->assertStringContainsString($old->database_name, $refused);
+
+        // And the refusal is real, not merely advisory.
+        $this->assertStringContainsString('cannot be removed', $this->refusalOf($old->fresh()));
+
+        // Nothing was asked of anything.
+        $this->assertSame([], $this->asked);
+    }
+
+    /** A shared FOLDER is the same fault, and step 4 deletes folders. */
+    public function test_a_shop_sharing_a_folder_with_another_cannot_be_removed(): void
+    {
+        $old = $this->shop(['name' => 'Old'], 'oldshop');
+
+        $this->shop([
+            'name' => 'Newer',
+            'host' => 'newer.soranstore.com',
+            'database_name' => 'soransto_newer_shop',
+            'shop_home' => $old->shop_home,
+        ], 'newer');
+
+        $this->assertStringContainsString('Newer', (string) $this->remover()->blocked($old->fresh()));
+    }
+
+    /** A shop standing alone is still removable — the guard must not block everything. */
+    public function test_a_shop_sharing_nothing_is_still_removable(): void
+    {
+        $alone = $this->shop([], 'alone');
+
+        $this->shop([
+            'name' => 'Unrelated',
+            'host' => 'unrelated.soranstore.com',
+            'database_name' => 'soransto_unrelated_shop',
+        ], 'unrelated');
+
+        $this->assertNull($this->remover()->blocked($alone->fresh()));
+    }
+
+    /**
+     * The way out of the refusal, or the guard is a dead end.
+     *
+     * A row that can be neither removed nor tidied away is one somebody deletes
+     * straight out of the database by hand, which is the dangerous way — the
+     * same argument Section 7 already made about never removing anything.
+     */
+    public function test_letting_go_of_a_record_destroys_nothing(): void
+    {
+        $old = $this->shop(['name' => 'Halabja Phone'], 'halabjaphone');
+
+        $hamza = $this->shop([
+            'name' => 'New Hamza',
+            'host' => 'hamza.soranstore.com',
+            'database_name' => $old->database_name,
+            'status' => Customer::ACTIVE,
+        ], 'hamza');
+
+        $this->post(route('customers.retire', $old), ['why' => 'Replaced by Hamza'])
+            ->assertRedirect(route('customers.index'))
+            ->assertSessionHas('success');
+
+        // The row is gone from the lists…
+        $this->assertNull(Customer::find($old->id));
+        $this->assertNotNull(Customer::withTrashed()->find($old->id));
+        $this->assertSame(Customer::ENDED, Customer::withTrashed()->find($old->id)->status);
+
+        // …and NOTHING was torn down.
+        $this->assertSame([], $this->asked, 'Letting go of a record must not touch a database or a domain.');
+        $this->assertDirectoryExists($old->shop_home);
+        $this->assertDirectoryExists($hamza->shop_home);
+        $this->assertNotNull(Action::where('action', 'shop.retired')->first());
+    }
+
+    /** And it is not a quiet way to hide a live shop. */
+    public function test_a_trading_shop_cannot_be_let_go(): void
+    {
+        $trading = $this->shop(['status' => Customer::ACTIVE], 'trading');
+
+        $this->post(route('customers.retire', $trading))->assertSessionHas('warning');
+
+        $this->assertNotNull(Customer::find($trading->id));
+    }
+
     private function shop(array $attributes = [], string $short = 'bazaar'): Customer
     {
         $home = $this->root.'/shops/'.$short;

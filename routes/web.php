@@ -89,6 +89,11 @@ Route::middleware('auth')->group(function () {
     // The one thing here that cannot be undone. Its rules are in ShopRemover.
     Route::delete('customers/{customer}', [RemoveShopController::class, 'destroy'])->name('customers.remove');
 
+    // Letting go of a record without destroying what it names — the answer to
+    // a removal refused because another shop stands on the same database.
+    Route::post('customers/{customer}/retire', [RemoveShopController::class, 'retire'])
+        ->name('customers.retire');
+
     /*
      * What version the code is on, and taking the next one from GitHub.
      * Section 3's one-codebase-many-shops only pays off if updating is

@@ -652,6 +652,35 @@
                        placeholder="Why, for the record (optional)" maxlength="255">
             </x-danger-form>
         </li>
+
+        {{-- The way out of the refusal above.
+
+             A record sharing its database with a live shop cannot be removed —
+             removing it would drop that shop's data. Without this it could not
+             be tidied away either, and a row that can be neither removed nor
+             retired is one somebody eventually DELETEs straight out of the
+             database, which is the dangerous way. Offered only when removal is
+             actually blocked, so it never becomes the quiet alternative to a
+             removal that ought to be thought about. --}}
+        @if($removalBlocked && ! $customer->trashed())
+            <li class="list-group-item">
+                <x-danger-form
+                    :action="route('customers.retire', $customer)"
+                    method="POST"
+                    label="Let go of this record"
+                    :confirm="$customer->host"
+                    :confirmLabel="'Type '.$customer->host.' to let it go'">
+                    <p class="small text-secondary">
+                        Takes this record off the panel and <strong>destroys nothing</strong>. The
+                        database <code>{{ $customer->database_name }}</code> and every folder stay
+                        exactly as they are, because another shop is using them. Its licences and
+                        payments stay readable at this same address.
+                    </p>
+                    <input type="text" name="why" class="form-control form-control-sm mb-2"
+                           placeholder="Why, for the record (optional)" maxlength="255">
+                </x-danger-form>
+            </li>
+        @endif
     </ul>
     <div class="card-footer small text-secondary">
         The panel may never write to this shop’s business tables or hold the private key — Section 7.
