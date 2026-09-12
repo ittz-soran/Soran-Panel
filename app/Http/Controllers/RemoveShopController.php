@@ -42,4 +42,36 @@ class RemoveShopController extends Controller
         // page that says so is a better answer than one that still looks live.
         return redirect()->route('customers.index')->with('success', $said);
     }
+
+    /**
+     * Let go of a record without destroying what it names.
+     *
+     * Here rather than on CustomerController because it is the answer to a
+     * refusal this controller gives: a record sharing its database with a live
+     * shop cannot be removed, and without this it could not be tidied away
+     * either — which is a dead end, and dead ends get solved with a DELETE
+     * typed straight into the database.
+     *
+     * Deliberately NOT offered as an easier removal. It is only reachable when
+     * the shop is not trading, exactly like removal, so it cannot become the
+     * way somebody quietly hides a live customer.
+     */
+    public function retire(Request $request, Customer $customer, ShopRemover $remover): RedirectResponse
+    {
+        $request->validate(['why' => ['nullable', 'string', 'max:255']]);
+
+        if (in_array($customer->status, [Customer::ACTIVE, Customer::TRIAL], true)) {
+            return back()->with('warning', 'Suspend it first. Letting go of a trading shop\'s record '
+                .'would leave a live till with nothing on the panel accounting for it.');
+        }
+
+        $remover->retire($customer, $request->input('why'));
+
+        return redirect()->route('customers.index')->with('success', sprintf(
+            '%s has been let go from the panel. Its database [%s] and its folders were left exactly '
+            .'as they are — nothing was deleted.',
+            $customer->name,
+            $customer->database_name,
+        ));
+    }
 }

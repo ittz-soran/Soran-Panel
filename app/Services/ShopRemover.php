@@ -70,7 +70,95 @@ class ShopRemover
                 .'and can put the licence straight back.';
         }
 
+        if ($sharer = $this->sharesSomethingWith($customer)) {
+            return $sharer;
+        }
+
         return null;
+    }
+
+    /**
+     * Another shop standing on the same database or the same folder.
+     *
+     * ⚠️ **The panel could destroy a live shop by removing a different one, and
+     * this is what stops it. Found before it happened, 2026-09-12.**
+     *
+     * Taking on a shop builds a NEW customer around an EXISTING database — that
+     * is the whole point of it, and Section 13 kept Halabja-phone's database for
+     * exactly that purpose. What it leaves behind is two rows naming one
+     * database:
+     *
+     *     Halabja Phone | soransto_halabjaphone_shop | halabjaphone.soranstore.com
+     *     New Hamza     | soransto_halabjaphone_shop | hamza.soranstore.com
+     *
+     * Removing the old row runs `drop($customer->database_name, …)` and takes
+     * the live shop's data with it. `blocked()` asked only whether the shop was
+     * trading, and the old row is not trading — so the button was open, and the
+     * teardown would have been faultless right up to destroying somebody's
+     * business.
+     *
+     * Folders are checked the same way and for the same reason: two records can
+     * point at one `shop_home` just as easily, and step 4 deletes it.
+     *
+     * Trashed rows are included deliberately. A soft-deleted customer's database
+     * has NOT been dropped unless it went through `remove()`, and "retired the
+     * row" is now a thing this panel can do on purpose — so a hidden row is
+     * still a reason not to drop anything.
+     */
+    private function sharesSomethingWith(Customer $customer): ?string
+    {
+        $others = Customer::withTrashed()
+            ->whereKeyNot($customer->getKey())
+            ->get(['id', 'name', 'database_name', 'shop_home', 'public_path']);
+
+        foreach ($others as $other) {
+            $shared = match (true) {
+                filled($customer->database_name) && $other->database_name === $customer->database_name => "the database [{$customer->database_name}]",
+                filled($customer->shop_home) && $other->shop_home === $customer->shop_home => "the folder [{$customer->shop_home}]",
+                filled($customer->public_path) && $other->public_path === $customer->public_path => "the public folder [{$customer->public_path}]",
+                default => null,
+            };
+
+            if ($shared !== null) {
+                return sprintf(
+                    'This cannot be removed: %s shares %s with it, and removing a shop drops its '
+                    .'database and deletes its folders. Doing that here would destroy %s. This is what '
+                    .'taking on a shop leaves behind — two records standing on one database — and the '
+                    .'answer is to retire this record rather than tear anything down.',
+                    $other->name, $shared, $other->name,
+                );
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Let go of the record without touching anything it names.
+     *
+     * The other half of the guard above, and it has to exist or the guard is a
+     * dead end: a duplicate row that cannot be removed and cannot be tidied
+     * away is one that sits in the list for ever, and somebody eventually
+     * deletes it from the database by hand — which is the dangerous way, the
+     * same argument Section 7 already made about never removing anything.
+     *
+     * So this is the tail of `remove()` and none of its teardown: marked ended,
+     * written down, soft-deleted. No dump is taken, because nothing is being
+     * destroyed — the database and the folders stay exactly where they are, in
+     * use by whoever else names them.
+     */
+    public function retire(Customer $customer, ?string $why = null): void
+    {
+        $customer->update(['status' => Customer::ENDED]);
+
+        Action::record('shop.retired', $customer, [
+            'why' => $why,
+            'note' => 'The record was let go. Its database and folders were left alone.',
+            'database' => $customer->database_name,
+            'shop_home' => $customer->shop_home,
+        ]);
+
+        $customer->delete();
     }
 
     /**
