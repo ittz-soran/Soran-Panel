@@ -86,6 +86,11 @@ class TakeOnShopTest extends TestCase
             {
                 return 'missing';
             }
+
+            public function sections(Customer $customer): ?array
+            {
+                return null;
+            }
         });
 
         $this->theirDatabase = 'takeon_'.bin2hex(random_bytes(4));

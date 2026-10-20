@@ -353,6 +353,67 @@
     </div>
 </div>
 
+{{-- Section 6b — which sections this shop has, read from the shop as the page
+     opened. Not in the danger zone: switching destroys nothing, and switching
+     back brings everything back, including who could use it. --}}
+@unless ($customer->trashed())
+    <div class="card mt-3" id="sections">
+        <div class="card-header d-flex flex-wrap align-items-center justify-content-between gap-2">
+            <span><i class="bi bi-sliders me-2"></i>Sections</span>
+            <small class="text-secondary">What this shop has, in its own words</small>
+        </div>
+
+        @if ($sections === null)
+            <div class="card-body small text-secondary">
+                The shop did not say which sections it has, so there is nothing to switch here.
+                Its code may be older than the switch — update the shop system, then reload this page.
+            </div>
+        @else
+            <ul class="list-group list-group-flush">
+                @foreach ($sections['sections'] as $section)
+                    {{-- The shop's own reason, on the button before the press. ⚠️ The
+                         one-line form, and no directive names in this comment either:
+                         Blade lifts php blocks out BEFORE it strips comments, and pairs
+                         an opening one with the next closing one wherever they are — a
+                         block here swallowed the page from the first one-liner down. --}}
+                    @php($held = ! $section['on'] ? null : ($section['holds'] ?? ($sections['holds_checked'] ? null : 'the shop could not check what is still in it.')))
+                    <li class="list-group-item d-flex flex-wrap justify-content-between align-items-center gap-2">
+                        <span>
+                            <span class="fw-semibold">{{ $section['name'] }}</span>
+                            @if ($section['testing'])
+                                <span class="badge text-bg-info ms-1">testing</span>
+                            @endif
+                            <span class="badge {{ $section['on'] ? 'text-bg-success' : 'text-bg-secondary' }} ms-1">
+                                {{ $section['on'] ? 'On' : 'Off' }}
+                            </span>
+                            @if ($held)
+                                <small class="d-block text-warning-emphasis">Cannot be switched off: {{ $held }}</small>
+                            @endif
+                        </span>
+
+                        <form method="POST" action="{{ route('customers.sections', $customer) }}" data-guard-submit class="m-0">
+                            @csrf
+                            <input type="hidden" name="section" value="{{ $section['key'] }}">
+                            <input type="hidden" name="on" value="{{ $section['on'] ? 0 : 1 }}">
+                            <button type="submit" @disabled($held)
+                                    class="btn btn-sm {{ $section['on'] ? 'btn-outline-secondary' : 'btn-outline-primary' }}">
+                                {{ $section['on'] ? 'Switch off' : 'Switch on' }}
+                            </button>
+                        </form>
+                    </li>
+                @endforeach
+            </ul>
+
+            @if ($sections['unknown'] !== [])
+                <div class="card-footer small text-danger">
+                    In its .env but not a section: {{ implode(', ', $sections['unknown']) }}.
+                    They switch nothing, and the next switch made here drops them.
+                </div>
+            @endif
+        @endif
+    </div>
+@endunless
+
 @if ($recentChecks->count() > 1)
     <div class="card mt-3">
         <div class="card-header"><i class="bi bi-clock-history me-2"></i>The last {{ $recentChecks->count() }} checks</div>

@@ -59,6 +59,9 @@ Route::middleware('auth')->group(function () {
     // Section 7's controls. All of them write the shop's .env, ask the shop
     // what it now thinks, and leave a record with a name on it.
     Route::post('customers/{customer}/storage', [CustomerController::class, 'storageLimit'])->name('customers.storage');
+
+    // Section 6b: logged, from → to. No hold — switching destroys nothing.
+    Route::post('customers/{customer}/sections', [CustomerController::class, 'section'])->name('customers.sections');
     Route::post('customers/{customer}/suspend', [CustomerController::class, 'suspend'])->name('customers.suspend');
     Route::post('customers/{customer}/resume', [CustomerController::class, 'resume'])->name('customers.resume');
 

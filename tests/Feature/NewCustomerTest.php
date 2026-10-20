@@ -180,6 +180,11 @@ class NewCustomerTest extends TestCase
             {
                 return 'unlicensed';
             }
+
+            public function sections(Customer $customer): ?array
+            {
+                return null;
+            }
         });
     }
 

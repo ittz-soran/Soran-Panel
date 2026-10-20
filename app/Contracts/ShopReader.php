@@ -41,4 +41,17 @@ interface ShopReader
      * is not the same as a licence that did not work.
      */
     public function licenceState(Customer $customer): ?string;
+
+    /**
+     * What the shop says it has — Section 6b, PROJECT_DOC Section 8h.
+     *
+     * The shop's own `shop:sections --json`: every section with whether it is
+     * on, why, whether it is in testing and what holds it; the names in its
+     * `.env` it does not know; and whether it could check what holds them.
+     * Null when the shop could not be asked — no artisan, no answer, or code
+     * older than the switch — which is not the same as a shop with nothing off.
+     *
+     * @return array{sections: list<array{key: string, name: string, on: bool, why: string, testing: bool, holds: ?string}>, unknown: list<string>, holds_checked: bool}|null
+     */
+    public function sections(Customer $customer): ?array;
 }

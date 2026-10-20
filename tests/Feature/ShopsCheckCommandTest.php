@@ -37,6 +37,11 @@ class ShopsCheckCommandTest extends TestCase
             {
                 return $this->read($customer)->licenceState;
             }
+
+            public function sections(Customer $customer): ?array
+            {
+                return null;
+            }
         });
     }
 

@@ -59,6 +59,11 @@ class ShopMigrateTest extends TestCase
             {
                 return 'valid';
             }
+
+            public function sections(Customer $customer): ?array
+            {
+                return null;
+            }
         });
     }
 

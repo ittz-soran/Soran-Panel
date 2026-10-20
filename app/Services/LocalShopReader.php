@@ -91,6 +91,31 @@ class LocalShopReader implements ShopReader
         return $this->json($artisan, ['licence:show', '--json'], $problems)['state'] ?? null;
     }
 
+    public function sections(Customer $customer): ?array
+    {
+        $problems = [];
+        $artisan = rtrim($customer->shop_home, '/').'/artisan';
+
+        if (! is_file($artisan)) {
+            return null;
+        }
+
+        $answer = $this->json($artisan, ['shop:sections', '--json'], $problems);
+
+        // Shaped like the command's answer, or not an answer: a shop on code
+        // older than the switch says "command not defined", and anything that
+        // half-parses must not be read as a shop with every section on.
+        if (! is_array($answer['sections'] ?? null) || ! array_key_exists('holds_checked', $answer)) {
+            return null;
+        }
+
+        return [
+            'sections' => array_values($answer['sections']),
+            'unknown' => array_values($answer['unknown'] ?? []),
+            'holds_checked' => (bool) $answer['holds_checked'],
+        ];
+    }
+
     /**
      * The shop's .env, parsed just enough.
      *

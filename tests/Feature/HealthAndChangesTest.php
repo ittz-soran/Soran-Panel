@@ -69,6 +69,11 @@ class HealthAndChangesTest extends TestCase
             {
                 return $this->extra['licence'] ?? null;
             }
+
+            public function sections(Customer $customer): ?array
+            {
+                return null;
+            }
         });
     }
 
