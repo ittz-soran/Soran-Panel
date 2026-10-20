@@ -157,7 +157,12 @@ class SchemaTest extends TestCase
     {
         $customer = Customer::factory()->create();
 
-        Payment::factory()->for($customer)->covering(3)->create([
+        // ⚠️ The date goes in through state(), not create(): covering() works
+        // out the end from `covers_from` while the factory is still building,
+        // before create()'s values are applied, so a date given only to
+        // create() left it counting from this month. It passed every September
+        // and failed from 1 October 2026.
+        Payment::factory()->for($customer)->state(['covers_from' => '2026-09-01'])->covering(3)->create([
             'paid_on' => '2026-09-01',
             'covers_from' => '2026-09-01',
             'amount' => 150000,
