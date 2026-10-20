@@ -155,6 +155,8 @@ database_user
 status                trial | active | suspended | ended
 monthly_fee           integer IQD, never decimal (PROJECT_DOC Section 2)
 storage_limit_mb      mirrors what is written to their .env
+sections_off          mirrors SHOP_SECTIONS_OFF, from the shop's own answer (Section 6b)
+sections_on           mirrors SHOP_SECTIONS_ON — sections in testing this shop has
 language              the language their install starts in
 started_on, notes, timestamps, soft deletes
 ```
@@ -235,6 +237,86 @@ What makes a trial actually run unlicensed is blanking `LICENCE_PUBLIC_KEY` in *
 
 ---
 
+## 6b. Sections — what each shop has — Soran, 2026-10-19
+
+*"i want manage from panel, and some time i want add new page to system and just
+want have for some store to test"*
+
+The shop side is PROJECT_DOC Section 8h, built and merged into the shop system
+first: six sections a shop can do without — stock rooms, second-hand, repairs,
+take apart & build, swaps, currencies — switched by `SHOP_SECTIONS_OFF` and
+`SHOP_SECTIONS_ON` in its `.env`. The real case is Hamza, once Halabja-phone,
+which needs no stock rooms, second-hand or repairs.
+
+**On the One customer page, a Sections card**, read from the shop when the page
+opens: every section with its switch, *testing* beside the ones not yet
+released, and the shop's own sentence on a switch it may not turn off. A shop
+whose code is older than the switch, or that does not answer, gets a card saying
+so and no switches — never a guess.
+
+Switching one, in `ShopControls::setSection()`:
+
+1. **The shop is asked first**: `shop:sections --json`. The list, and what holds
+   each section, is the shop's own answer, never the panel's reading of the
+   shop's tables.
+2. **Switching off is refused while something holds it**, with the shop's
+   sentence: *"14 units are in Back room. Move them to the main room first."*,
+   *"2 repair jobs are open. A customer's device is in the shop."* — and refused
+   too when the shop could not say (`holds_checked` false), because *could not
+   ask* is not *nothing holds it*.
+3. **The two lines are rewritten from the shop's answer**, never from the
+   panel's copy and never from anything typed: a released section goes in or out
+   of `SHOP_SECTIONS_OFF`, a section in testing in or out of `SHOP_SECTIONS_ON`.
+   A name the shop does not know — `repair` written by hand for `repairs` — is
+   shown on the card and dropped by the next write. `.env.bak` is kept, as for
+   every `.env` change.
+4. **The shop's compiled code is cleared**, so it takes effect at once.
+5. **The shop is asked again.** The switch counts as done only if the shop now
+   says so; `sections_off` and `sections_on` on `customers` are set from that
+   second answer, never from what was written.
+6. **Logged** in `actions` as `section.switched`, from → to, with what the shop
+   said.
+
+**No hold-to-confirm.** Nothing in the shop is deleted by switching, and
+switching back brings everything back, including who could use it. A switch that
+holds for two seconds teaches people to hold without reading. It is logged, like
+a storage limit.
+
+**Trying a new page** is the same card: a section in testing is listed with its
+badge, off everywhere, and turning it on for one shop is the whole of "try it
+here". Once a later update releases it, it is listed like any other.
+
+⚠️ **A section in testing reaches every shop's DATABASE**, not only the ones
+trying it — one codebase, one schema (Section 3), so `migrate` runs its tables
+on every customer. Only the screens are switched.
+
+⚠️ **The panel's own environment never reaches a shop's sections.**
+`ShopEnvironment` strips `SHOP_SECTIONS_*` before running a shop's artisan, like
+every other framework key: a variable set wherever the panel runs would
+otherwise beat the shop's own `.env`, because Dotenv never overrides what is
+already set.
+
+**Built 2026-10-20.** `ShopReader::sections()` (one more method on the one
+reading service, as Section 8 asks), `ShopControls::setSection()`, the card on
+One customer, and `customers.sections_off` / `sections_on`.
+
+**Proved.** `SectionsTest`, 19 tests, against a stand-in shop that reads its
+`.env` the way the shop system does, so before and after is a real round trip
+through the file — and the real reader against a stand-in `artisan`, because a
+shop on older code answers "command not defined" and half an answer must not be
+read as every section on. Each of nine guards was broken on purpose and its test
+failed for that reason. **Then end to end, the real panel against the real shop
+system:** stock rooms and second-hand switched off and the shop said so; repairs
+refused with the shop's own *"1 repair job is open"*; the job closed, repairs
+switched off, and the shop said that too.
+
+⚠️ **A Blade trap, found by the card's first render.** This page already uses
+the one-line `@php(...)` form, and Blade lifts php blocks out of a template
+BEFORE it strips comments, pairing an opening one with the next closing one
+wherever they are. A block form added below the first one-liner swallowed the
+page from there down — and a comment that merely *named* the two directives did
+the same. The card uses the one-line form, and its comment names neither.
+
 ## 7. What the panel may do, and the guard rails
 
 Soran chose: **everything, with a hold-to-confirm on anything destructive.** The hosting supports it — `proc_open` allowed, all three binaries present, UAPI answering.
@@ -248,6 +330,7 @@ Soran chose: **everything, with a hold-to-confirm on anything destructive.** The
 | Run a shop's backup, and download it | Logged. The download takes the log row, never a path — the panel only hands over a file it has a record of writing. |
 | Run a shop's migrations | Hold to confirm. Backup taken first, and if the backup fails the migration does not run. Their own `migrate`, through their own artisan. |
 | Read a shop's health and data check | Read-only by construction. |
+| Switch a section on or off | Refused while the shop says something holds it, or cannot say. Logged, from → to. Destroys nothing — Section 6b. |
 | Throw away what a shop compiled | Logged. Destroys nothing. **The only command the panel runs on a shop for its own sake** — see below. |
 | **Remove a shop for good** | Suspended first. A dump of its database, copied out of reach, before anything. Hold to confirm, typed host. |
 
@@ -341,7 +424,7 @@ Mockups were built and approved against the shop system's own stylesheet, so the
 |---|---|
 | **Overview** | Only what needs Soran this week: licences running out, storage near its limit, shops nobody has used. Everything else is a number. |
 | **Customers** | The working screen. Shop, licence state, expiry, storage, last used, schema, monthly fee. Filter by "needs chasing". |
-| **One customer** | Licence with its full history, storage broken into database/backups/uploads, whether they are actually using it, its schema state, and the danger zone. A REMOVED shop keeps this page at the same address — the controls are replaced by a note saying when it went and where its last backup is, because the licences and payments below them outlive the shop. |
+| **One customer** | Licence with its full history, storage broken into database/backups/uploads, whether they are actually using it, its schema state, its sections (Section 6b), and the danger zone. A REMOVED shop keeps this page at the same address — the controls are replaced by a note saying when it went and where its last backup is, because the licences and payments below them outlive the shop. |
 | **Renew** | The paste-and-verify flow from Section 6, with what-will-happen shown beside it. |
 | **New customer** | One form replacing six manual steps. |
 | **Subscriptions** | Who has paid, who has not, what the month is worth. |
@@ -383,7 +466,8 @@ What crosses between them is deliberately small and one-directional:
 
 - The panel **reads** `PANEL_DOC.md` and `PROJECT_DOC.md` for the rules.
 - The panel **runs** the shop system's artisan commands with `SHOP_HOME` set —
-  `install:sql`, `licence:show`, `migrate`, `backup:run`, the data check. It
+  `install:sql`, `licence:show`, `shop:sections`, `migrate`, `backup:run`, the
+  data check. It
   does this as a subprocess against the shared codebase on the server, not by
   importing any of its classes.
 - The panel **reuses the look** — Bootstrap 5.3 and the shop system's compiled
@@ -471,6 +555,9 @@ that unlikely rather than impossible.
     cPanel "using its own path and ignoring what was typed"; this is the
     mechanism, and DEPLOY.md now says to give the path relative to home and to
     check it rather than trust the list.
+11. **Sections** — Section 6b, after the shop system's half (PROJECT_DOC
+    Section 8h) is merged and every shop updated, so each one can answer
+    `shop:sections`. Then Hamza's three switched off through it.
 
 ---
 
@@ -478,6 +565,7 @@ that unlikely rather than impossible.
 
 | Date | Done | Next |
 |---|---|---|
+| 2026-10-20 | **Sections** (Section 6b), decided with Soran on 2026-10-19 and built after the shop system's half. A card on One customer that asks the shop what it has, refuses to switch off what the shop says is held or cannot say, rewrites the two `.env` lines from the shop's own answer, clears the compiled code, asks again, and logs from → to. 19 tests, nine guards sabotaged and caught, and run end to end against the real shop system: Hamza's three switched off, repairs refused while a job was open. **Found on the way, not caused by it:** `SchemaTest::test_a_payment_records_which_period_it_buys` has failed since 2026-10-01 — `PaymentFactory::covering()` reads the factory's own `covers_from`, which is this month, not the one the test passes to `create()`, so it only ever passed in September. | Merge the shop system's half, update every shop, then switch Hamza's three off |
 | 2026-09-12 | **The panel could destroy a live shop by removing a different one. Caught before it happened, by Soran asking first.** He wanted to tidy away the old Halabja Phone record and asked whether Hamza's database would go with it. It would have. Taking on a shop builds a new customer around an EXISTING database — that is the whole point, and Section 13 kept that database so it could be done — so what it leaves behind is two rows naming one database: `Halabja Phone` and `New Hamza`, both on `soransto_halabjaphone_shop`. `remove()` runs `drop($customer->database_name, …)`, and the only question asked beforehand was: is this shop trading? The old row was not, so the button was open and the teardown would have been faultless right up to dropping a live shop's data. **The shape of the answer is Soran's, and it is better than the two-button one it replaced.** A first attempt refused the removal outright and offered a second button that destroyed nothing; he cut through both — *"just when delete ask me to stay database and database_user or fully destroyed"*. That is right, and the reason is worth keeping: **the subdomain, the DNS record and the folders are ALWAYS this record's own.** A taken-on shop takes a new short name, so `paths($short)` gives it new folders and `refuseIfAnythingIsInTheWay()` guarantees they are nobody else's. Only the database can belong to another record. So there is one button, it always takes the domain and the folders, and it asks one question — drop the database or keep it. The choice is `required`: a default would be wrong either way, making a shared database one careless press from destruction, or quietly leaving one behind when somebody meant to be rid of it. When another record is standing on the database the choice is **not offered at all** rather than offered and refused, and `remove()` throws if it is asked for anyway — a screen and a service that disagree is how the guard gets lost in a later edit. The dump is taken only when the database is actually going: a copy of a thing that is not going anywhere is not insurance, it is a second copy to keep in step. Six tests; the guard's own goes red when it is removed. **Worth recording as method:** nothing here was found by a test or a tool. It was found because the person about to press the button asked what it would do first. | An edit screen for a customer's safe fields — the panel has none at all |
 | 2026-09-11 | **Halabja-phone is back, under the name Hamza, and the decision to keep its database is what made that possible.** Section 4 deleted that install's folder for serving its `.env` to anyone; Section 13 ruled the database must be kept, "because that is what a rebuilt install restores from"; Section 11 step 10 then recorded the take-on half as *not needed*, since Soran stopped working for them on 2026-09-02. Nine days later they came back and it was needed after all — the install was rebuilt around the kept database, and the take-on screen was run against real data for the first time rather than only by its tests. **Worth keeping as the argument for the rule:** the cheap decision was to drop the database with the folder, and nothing would have survived it. **The finding of the day is cron.** **The one thing that turned out never to have been done is cron.** `panel:check` warned about a backup five days old beside a health check eleven hours old, which does not fit a single cause — and `crontab -l` printed nothing at all. The proof is in the backup filenames: every copy the panel holds is at a human hour, `22:50` and `22:51` a minute apart, none at the `02:30` the schedule asks for. Every backup and every health check this panel has ever taken was run by hand; `schedule:list` showing "Next Due" is the definition, not evidence that anything calls it. DEPLOY.md step 7 is the step that was missed, and until it is added nothing here runs itself: not the hourly check, not the nightly backup. Worth recording as method — the warning that led here was read as two problems and was one absence, and the filenames settled it where the timestamps alone could not. | The cron entry (DEPLOY.md step 7), then `PANEL_BACKUPS_OFFSITE` |
 | 2026-09-11 | **Every test the panel has, actually run — 517 of 517, nothing skipped.** It was 488 passing with **29 skipped**, and every skip said the same thing: *this machine has not got the thing*. No MySQL, no `mysqldump`, no `git`, no `posix`, no `public/build`. A test that skips itself in the only place it ever runs is not a test — and among these were the three that matter most here: **the panel's own backup, the restore drill, and taking on a shop**. Section 13 calls losing this database worse than losing any one shop and asks for a drill before go-live; the drill had never been run. It has now, on real MariaDB 10.11, and **it passes**: it fills a scratch database, dumps it, drops the whole database rather than its tables, checks `information_schema` to prove nothing survived, restores and reads the customer back. All 26 MySQL-dependent skips ran and **all 26 passed** — there was nothing hiding in them, which is worth knowing rather than assuming. **CI was the real gap, closed three ways.** It installs `mariadb-client`, because the backup and the drill shell out to `mysqldump` and `mysql` and skip silently without them — a skipped drill is not a drill. It adds `posix`, which is how the panel asks who the web user is. And it **borrows the shop system's compiled `build/` by sparse checkout**, which is the one that would never have been found otherwise: `BorrowedStylesheetTest` checks that the entry names the panel's layouts ask `@vite` for are keys in the *borrowed* manifest — the panel has no `resources/scss/app.scss` and no npm at all — so if the shop system renames an entry, every panel page throws. That check skipped whenever `public/build` was absent, which in CI was always, so **the only guard on a real coupling between two repositories ran nowhere**. Now: SQLite job 491 passing with 26 legitimately-MySQL skips; MariaDB job 517 passing with none. | Step 10 — Soran's own shop, then Halabja-phone |

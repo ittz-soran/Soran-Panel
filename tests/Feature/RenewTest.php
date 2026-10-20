@@ -117,6 +117,11 @@ class RenewTest extends TestCase
             {
                 return $this->state;
             }
+
+            public function sections(Customer $customer): ?array
+            {
+                return null;
+            }
         });
     }
 

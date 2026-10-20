@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Contracts\ShopReader;
 use App\Models\Action;
 use App\Models\Customer;
 use App\Services\ShopControls;
@@ -47,9 +48,14 @@ class CustomerController extends Controller
         ]);
     }
 
-    public function show(Customer $customer, ShopRemover $remover): View
+    public function show(Customer $customer, ShopRemover $remover, ShopReader $reader): View
     {
         return view('customers.show', [
+            // Section 6b: asked of the shop as the page opens, because the
+            // reason a switch is disabled has to be the shop's reason now, not
+            // an hour old. Null when it could not be asked.
+            'sections' => $customer->trashed() ? null : $reader->sections($customer),
+
             // Section 7's rail: the reason lives on the button before the
             // press. The screen asks the same method `remove()` asks, so a
             // button that is enabled is one that will not be refused.
@@ -126,6 +132,28 @@ class CustomerController extends Controller
         return back()->with('success', $fields['storage_limit_mb'] === null
             ? "{$customer->name} now has no storage limit at all."
             : "{$customer->name}'s limit is now ".number_format((int) $fields['storage_limit_mb']).' MB.');
+    }
+
+    /**
+     * Section 6b: switch one section on or off for this shop.
+     *
+     * The name posted is only ever matched against the shop's own list —
+     * nothing typed here reaches the shop's .env as it was typed.
+     */
+    public function section(Request $request, Customer $customer, ShopControls $controls): RedirectResponse
+    {
+        $fields = $request->validate([
+            'section' => ['required', 'string', 'max:64'],
+            'on' => ['required', 'boolean'],
+        ]);
+
+        try {
+            $result = $controls->setSection($customer, $fields['section'], (bool) $fields['on']);
+        } catch (Throwable $e) {
+            return back()->with('warning', 'Nothing was changed: '.$e->getMessage());
+        }
+
+        return back()->with($result['ok'] ? 'success' : 'warning', $result['said']);
     }
 
     /** Section 7: hold to confirm, typed shop name. */

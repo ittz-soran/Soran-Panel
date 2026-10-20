@@ -18,7 +18,7 @@ use Illuminate\Support\Carbon;
 #[Fillable([
     'name', 'contact_name', 'phone', 'email', 'host',
     'shop_home', 'public_path', 'database_name', 'database_user',
-    'status', 'monthly_fee', 'storage_limit_mb', 'language', 'started_on', 'notes',
+    'status', 'monthly_fee', 'storage_limit_mb', 'sections_off', 'sections_on', 'language', 'started_on', 'notes',
 ])]
 class Customer extends Model
 {

@@ -50,6 +50,115 @@ class ShopControls
     }
 
     /**
+     * Switch one section on or off for one shop — Section 6b, PROJECT_DOC 8h.
+     *
+     * The shop is asked before and after, and its answer is the only source:
+     * the lines are rebuilt from what it says it has, never from the panel's
+     * copy and never from anything typed, and the switch counts as done only
+     * if the shop then says so. Nothing in the shop is deleted either way.
+     *
+     * @return array{ok: bool, said: string}
+     */
+    public function setSection(Customer $customer, string $key, bool $on): array
+    {
+        $before = $this->reader->sections($customer);
+
+        if ($before === null) {
+            return ['ok' => false, 'said' => "{$customer->name} did not say which sections it has, so nothing was "
+                .'changed. Its code may be older than the switch — update the shop system first.'];
+        }
+
+        $section = collect($before['sections'])->firstWhere('key', $key);
+
+        if ($section === null) {
+            return ['ok' => false, 'said' => "{$customer->name} has no section called [{$key}], so nothing was changed."];
+        }
+
+        $state = $on ? 'on' : 'off';
+
+        if ($section['on'] === $on) {
+            return ['ok' => true, 'said' => "{$section['name']} is already {$state} for {$customer->name}."];
+        }
+
+        // ⚠️ "Could not ask" is not "nothing holds it".
+        if (! $on && ! $before['holds_checked']) {
+            return ['ok' => false, 'said' => "{$customer->name} could not check what is still in its "
+                .'sections, so nothing was switched off.'];
+        }
+
+        if (! $on && $section['holds'] !== null) {
+            return ['ok' => false, 'said' => "{$section['name']} cannot be switched off for {$customer->name}: {$section['holds']}"];
+        }
+
+        $this->writer->putEnv($customer, self::sectionLines($before['sections'], $key, $on));
+        $this->writer->clearCache($customer);
+
+        $after = $this->reader->sections($customer);
+        $now = $after === null ? null : collect($after['sections'])->firstWhere('key', $key);
+
+        // The panel's copy, from what the shop says now — never from what was
+        // written, which is only what was meant.
+        if ($after !== null) {
+            $lines = self::sectionLines($after['sections']);
+
+            $customer->update([
+                'sections_off' => $lines['SHOP_SECTIONS_OFF'],
+                'sections_on' => $lines['SHOP_SECTIONS_ON'],
+            ]);
+        }
+
+        Action::record('section.switched', $customer, [
+            'section' => $key,
+            'from' => $section['on'] ? 'on' : 'off',
+            'to' => $state,
+            'shop_says' => $now === null ? null : ($now['on'] ? 'on' : 'off'),
+        ]);
+
+        return $now !== null && $now['on'] === $on
+            ? ['ok' => true, 'said' => "{$section['name']} is {$state} for {$customer->name}, and the shop says so."]
+            : ['ok' => false, 'said' => "The lines were written into {$customer->name}'s .env, and the shop "
+                .($now === null ? 'did not answer afterwards' : 'still says '.$section['name'].' is '.($now['on'] ? 'on' : 'off'))
+                .'. Check it.'];
+    }
+
+    /**
+     * The two lines, rebuilt from the shop's own answer — with one section
+     * moved, or as they stand.
+     *
+     * A released section is off by being named in OFF; one in testing is on by
+     * being named in ON. A name the shop does not know is not in its answer,
+     * so the first write drops it.
+     *
+     * @param  list<array{key: string, why: string, testing: bool}>  $sections
+     * @return array{SHOP_SECTIONS_OFF: string, SHOP_SECTIONS_ON: string}
+     */
+    private static function sectionLines(array $sections, ?string $key = null, ?bool $on = null): array
+    {
+        $off = [];
+        $tried = [];
+
+        foreach ($sections as $section) {
+            $inOff = $section['why'] === 'SHOP_SECTIONS_OFF';
+            $inOn = $section['why'] === 'SHOP_SECTIONS_ON';
+
+            if ($section['key'] === $key) {
+                $inOff = ! $section['testing'] && ! $on;
+                $inOn = $section['testing'] && $on;
+            }
+
+            if ($inOff) {
+                $off[] = $section['key'];
+            }
+
+            if ($inOn) {
+                $tried[] = $section['key'];
+            }
+        }
+
+        return ['SHOP_SECTIONS_OFF' => implode(',', $off), 'SHOP_SECTIONS_ON' => implode(',', $tried)];
+    }
+
+    /**
      * Stop a shop, without locking anybody out of their own records.
      *
      * The lever is the licence, and that is deliberate. Taking the LICENCE_KEY
